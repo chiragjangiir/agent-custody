@@ -168,6 +168,18 @@ permit(principal, action == Action::"memory.retract", resource)
 when { context.facts has target && context.facts.target.provenance == "claimed" };
 ```
 
+## Saying why a rule denies
+
+Put a `@reason("...")` annotation before a `forbid` rule. The Claude Code hook shows the text to the agent and to the person who reads the session, and `agent-custody report` prints it before the rule.
+
+```cedar
+@reason("force push rewrites shared history")
+forbid(principal, action == Action::"Bash", resource)
+when { context.args has command && context.args.command like "*git push*--force*" };
+```
+
+The hook text is `agent-custody denied this call: force push rewrites shared history (rule policy1, receipt <id>)`. A rule with no annotation shows its id. The annotation is part of the policy file, so it changes the policy digest, but it never changes the decision or the receipt format. Keep the reason short and say what the rule forbids, not what the agent did. Only the Claude Code hook and the report read it today.
+
 ## Gotchas
 
 - **Integers only.** `12.50` is not a Cedar value. Send `1250`.

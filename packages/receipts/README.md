@@ -56,6 +56,8 @@ const bundle = JSON.parse(readFileSync("receipts/<id>.json", "utf8"));
 verifyBundle(bundle, { issuerKeys: [loadPublicKey("keys/app.pub")], logFile: "log.jsonl" }).ok;   // true
 ```
 
+For your own Claude Code sessions, one command does the whole setup (key, config in observe mode, starter deny policy, hooks), and `agent-custody report` lists the calls the policy would have denied: `npx @agent-custody/receipts init claude-code`, then see [docs/sdk.md](docs/sdk.md#claude-code).
+
 Framework hooks and adapters, including Claude Code, the OpenAI Agents SDK, the Vercel AI SDK, LangChain, OpenClaw, DeepSeek Harness, Hermes and Google ADK, are in [docs/sdk.md](docs/sdk.md). To enforce rather than record, put the gateway between the agent and its tools: `npx @agent-custody/receipts gateway --config gateway.json`, set up in [docs/usage.md](docs/usage.md); between an agent and the agents it delegates to over A2A, `--a2a` serves the gateway as an A2A agent itself. The gateway is listed in the [MCP Registry](https://registry.modelcontextprotocol.io/) as `io.github.svayatta/agent-custody`; its entry is [server.json](server.json), published after each npm release by running the `mcp-registry` workflow from the Actions tab (GitHub OIDC, no token).
 
 ## How it fits together
@@ -114,7 +116,7 @@ Every receipt names its issuer, and the verifier prints what that issuer kind is
 | --- | --- | --- | --- | --- |
 | any MCP host: Claude Desktop, Claude Code, Cursor, custom | gateway | yes | | a real MCP client and upstream over stdio |
 | Codex CLI (headless) | gateway | yes | | a manual `codex exec` run and offline MCP recovery checks; [guide](docs/codex-recovery.md) |
-| Claude Code | SDK | `hook` command, PreToolUse deny | PostToolUse | the documented hook contract, via stdin |
+| Claude Code | SDK | `hook` command, PreToolUse deny; `init claude-code` sets it up | PostToolUse | the documented hook contract, via stdin; `init` and `report` against a temporary home |
 | Claude Agent SDK | SDK | `claudeAgentHooks` | same | the same handler |
 | OpenAI Agents SDK (JS) | SDK | `wrapTools` | `observeRunner` | a real `Runner` with a scripted model |
 | Vercel AI SDK | SDK | `wrapTools` | | a real `generateText` loop over the SDK's mock model |
@@ -244,7 +246,7 @@ If a vendor tells you their receipts prove more than the first five rows, ask th
 ```
 src/config.ts      gateway and SDK config schemas, path resolution
 src/crypto.ts      canonical JSON, sha256, Ed25519 keys, DSSE sign/verify
-src/log.ts         Merkle log: append, root, inclusion and consistency proofs, verify, JSONL persistence
+src/log.ts         Merkle log: append, root, inclusion and consistency proofs, verify, JSONL persistence; an O_EXCL lock file makes an append safe when several processes share one log file
 src/log-check.ts   the outside monitor: verifies the head, checkpoints, witness, and anchor of a running log
 src/portal.ts      the tenant portal: register, first key, usage against plan, keys, Stripe billing, export, member roles, TOTP MFA, single sign-on, on the log's Postgres
 src/sso.ts         enterprise sign-in for the portal: OIDC (code and PKCE, id_token checked against the IdP's key set) and SAML 2.0 (signed assertions only, through @node-saml/node-saml)
@@ -278,7 +280,10 @@ src/upstream.ts    attested execution: an upstream signs its result for the rece
 src/capture.ts     private evidence: per-tool capture rules applied by the issuer to the whole statement, withheld values as salted commitments or encrypted under the customer's key, restore and reveal
 vectors/           conformance vectors: receipts, keys, logs, proofs, and expected verdicts; `bun run vectors` regenerates them
 src/verify.ts      offline verification, the human-readable report, and the audit that a later log extends an earlier one
-src/cli.ts         keygen, grant, gateway, hook, serve, log, prune, verify, reveal, audit, policy simulate
+src/claude-init.ts `init claude-code`: the agent key, the observe-mode config, the starter policy, and the three hooks merged into the settings file with absolute paths
+src/deny-report.ts `report`: verifies the receipts of an SDK config and lists the calls the policy would have denied
+templates/         the starter Cedar policy that `init claude-code` copies (shipped in the package)
+src/cli.ts         keygen, grant, gateway, init, report, hook, serve, log, prune, verify, reveal, audit, policy simulate
 src/retention.ts   pruning the log: leaves become their hashes, bundles are removed, proofs survive
 src/index.ts       the package's public surface; adapters are exported on ./sdk/<framework> subpaths
 tsconfig.build.json  emits dist/ (JavaScript plus declarations) for consumers; the repo itself runs the .ts directly
@@ -295,6 +300,8 @@ The design is two producers feeding one verifier. The SDK is the top of the funn
 
 **Done**
 
+- An incident replay: `node examples/38-incident-replay.ts` plays a Claude Code session against the starter deny set in enforce mode. `terraform destroy` and `rm -rf ~` are denied before they run, and the denial receipts verify offline with the public key only. The site page [An incident replay](../../site/guide/incident-replay.md) shows the output and the limit: a credential in the agent's environment goes around the hook (tutorial 38).
+- One command for Claude Code (issue #204): `agent-custody init claude-code` makes the agent key, writes `sdk.json` in observe mode with no log, writes a starter deny policy, and merges the three hooks into `.claude/settings.local.json` or `~/.claude/settings.json` with absolute paths, safe to run two times. `agent-custody report` verifies the receipts and prints the calls the policy would have denied, with the reason, the rule, and the receipt id; removing the `mode` line enforces. The default local log takes a lock for each append, so hooks that run at the same time keep one log; `--log-url` needs `--log-key`; a second run keeps the pinned log key and warns about log flags it does not apply; `init` warns when git does not ignore the project settings file ([sdk.md](docs/sdk.md#claude-code), tutorial 36).
 - Strict mode: `"strict": true` refuses a local log, a log that is not hash-only, and a log without pinned keys; precommits every tool, in observe mode too; and turns the outbox off. No call the agent makes is forwarded before its authorization is in a log the operator does not run, every receipt says `issuer.strict`, and `verify --require-strict` requires it ([usage](docs/usage.md#strict-mode), tutorial 34). [Issue #177](https://github.com/svayatta/agent-custody/issues/177).
 - Policy reload: the gateway re-reads `policy.cedar` whenever it changes and applies it from the next call, with no restart and no dropped session; a policy that does not parse is refused and the one in force stays, and every change or refusal is recorded in `receipts/policy-reloads.jsonl` ([usage](docs/usage.md)).
 - Live Codex support recovery demo: model-selected MCP calls, incorrect CRM memory, a reviewed recovery plan, simulated credit compensation, and verified evidence; [guide](docs/codex-recovery.md), with offline regression coverage.

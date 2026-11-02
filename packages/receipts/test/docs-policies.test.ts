@@ -3,7 +3,7 @@
 import { readFileSync } from "node:fs";
 import * as cedar from "@cedar-policy/cedar-wasm/nodejs";
 import { describe, expect, it } from "vitest";
-import { evaluate } from "../src/policy.ts";
+import { evaluate, policyReasons } from "../src/policy.ts";
 
 const doc = readFileSync(new URL("../docs/policies.md", import.meta.url), "utf8");
 const blocks = [...doc.matchAll(/```cedar\n([\s\S]*?)```/g)].map((m) => m[1]!);
@@ -18,7 +18,7 @@ const decide = (i: number, r: ReturnType<typeof req>) => evaluate(blocks[i]!, r)
 
 describe("docs/policies.md examples", () => {
   it("contains the expected number of examples", () => {
-    expect(blocks.length).toBe(15);
+    expect(blocks.length).toBe(16);
   });
 
   it("every block parses as a Cedar policy set", () => {
@@ -113,6 +113,12 @@ describe("docs/policies.md examples", () => {
     expect(decide(14, req("memory.retract", { factId: "f", reason: "r" }, { target: { space: "team:support", provenance: "attested", actor: "me" } }))).toBe("deny");
     expect(decide(14, req("memory.forget", { factId: "f", reason: "r" }))).toBe("deny");
     expect(decide(14, req("memory.hold", { factId: "f", reason: "r" }))).toBe("deny");
+  });
+  it("15: a rule carries its @reason, and the annotation does not change the decision or the rule id", () => {
+    expect(policyReasons(blocks[15]!)).toEqual(["force push rewrites shared history"]);
+    const forced = evaluate(blocks[15]!, req("Bash", { command: "git push --force origin main" }));
+    expect(forced).toMatchObject({ decision: "deny", reasons: ["policy0"], errors: [] });
+    expect(evaluate(blocks[15]!, req("Bash", { command: "ls" })).reasons).toEqual([]);
   });
   it("8: grant is reachable from context", () => {
     expect(decide(8, req("stripe.refund", {}))).toBe("allow");

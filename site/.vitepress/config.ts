@@ -101,6 +101,7 @@ export default withMermaid(
           { text: "FAQ: where the data goes", link: "/faq" },
           { text: "Use cases, with their policies", link: "/use-cases" },
           { text: "Getting started", link: "/guide/getting-started" },
+          { text: "An incident replay", link: "/guide/incident-replay" },
           { text: "Architecture", link: "/guide/architecture" }, { text: "Deployment", link: "/guide/deployment" },
           { text: "Agent sessions in this repository", link: "/custody" },
           { text: "Changelog", link: "/changelog" },

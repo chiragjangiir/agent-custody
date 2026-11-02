@@ -35,6 +35,9 @@ import { serveConsole } from "./console.ts";
 import { TREEHEAD_TYPE, type AuthorizationBundle, type ReceiptBundle, type TreeHead, type ReceiptStatement } from "./receipt.ts";
 import { MerkleLog } from "./log.ts";
 import { createSdkIssuer } from "./sdk/index.ts";
+import { initClaudeCode } from "./claude-init.ts";
+import { denyReport, formatDenyReport } from "./deny-report.ts";
+import { fileURLToPath } from "node:url";
 import { handleHookEvent, type HookInput } from "./sdk/claude.ts";
 import { auditExtends, formatReport, verifyBundle } from "./verify.ts";
 import { formatSimulation, simulatePolicy, verifyOrphanAuthorization, type SimulationSkip } from "./simulate.ts";
@@ -93,6 +96,11 @@ const USAGE = `agent-custody <command>
   gateway --config <gateway.json> [--http [--port 8790] [--host 127.0.0.1] [--idle-minutes 30]]
                                                    stdio: one gateway for the grant the config names. --http: one shared gateway, MCP over
                                                    Streamable HTTP at /mcp, each connection presenting its own grant as Authorization: Bearer
+  init claude-code [--dir <dir>] [--user] [--enforce] [--log-url <url> [--log-id <id>] [--log-token-env NAME] [--log-key <pub>]]
+                                                   one command for your own Claude Code sessions: an agent key, sdk.json in observe mode, a starter deny
+                                                   policy, and the three hooks in .claude/settings.local.json (--user: ~/.claude/settings.json). Safe to run twice
+  report  --config <sdk.json>                      the calls that the policy would have denied, from the receipts: tool, command or path, rule, receipt id;
+                                                   a receipt that does not verify is counted apart. Exits 1 when any receipt does not verify
   hook    [--config <sdk.json>]        Claude Code hook command; reads the event on stdin (or AGENT_CUSTODY_CONFIG)
   serve   --config <sdk.json> [--port 8788] [--host 127.0.0.1]   the SDK as a local HTTP API for agents in other languages
   prune   --log <log.jsonl> --before <ISO instant> [--receipts <dir>]
@@ -320,6 +328,40 @@ async function main(argv: string[]): Promise<number> {
       await serveStdio(gw);
       await gw.close();
       return 0;
+    }
+    case "init": {
+      const [target, ...args] = rest;
+      if (target !== "claude-code") throw new Error("init needs a target: init claude-code");
+      const { values } = parseArgs({
+        args,
+        options: {
+          dir: { type: "string" },
+          user: { type: "boolean", default: false },
+          enforce: { type: "boolean", default: false },
+          "log-url": { type: "string" },
+          "log-id": { type: "string" },
+          "log-token-env": { type: "string" },
+          "log-key": { type: "string" },
+        },
+      });
+      initClaudeCode({
+        cliPath: fileURLToPath(import.meta.url),
+        ...(values.dir ? { dir: values.dir } : {}),
+        user: values.user,
+        enforce: values.enforce,
+        ...(values["log-url"] ? { logUrl: values["log-url"] } : {}),
+        ...(values["log-id"] ? { logId: values["log-id"] } : {}),
+        ...(values["log-token-env"] ? { logTokenEnv: values["log-token-env"] } : {}),
+        ...(values["log-key"] ? { logKey: values["log-key"] } : {}),
+      });
+      return 0;
+    }
+    case "report": {
+      const { values } = parseArgs({ args: rest, options: { config: { type: "string" } } });
+      if (!values.config) throw new Error("report needs --config <sdk.json>");
+      const report = denyReport(resolve(values.config));
+      console.log(formatDenyReport(report));
+      return report.unverified.length ? 1 : 0;
     }
     case "hook": {
       const { values } = parseArgs({ args: rest, options: { config: { type: "string" } } });

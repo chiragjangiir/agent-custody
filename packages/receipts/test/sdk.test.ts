@@ -95,6 +95,59 @@ describe("Claude Code hook handler", () => {
     expect(st.predicate.execution.status).toBe("denied");
   });
 
+  describe("the denial text", () => {
+    const RULES = `permit(principal, action, resource);
+@reason("force push rewrites shared history")
+forbid(principal, action == Action::"Bash", resource) when { context.args.command like "*git push --force*" };
+@reason("rm -rf on the home directory")
+forbid(principal, action == Action::"Bash", resource) when { context.args.command like "*rm -rf ~*" };
+forbid(principal, action == Action::"Bash", resource) when { context.args.command like "*--no-verify*" };
+`;
+    let ruleDir: string;
+    let ruleSdk: SdkIssuer;
+    let ruleOpts: VerifyOptions;
+    const pre = (command: string) => handleHookEvent(ruleSdk, { hook_event_name: "PreToolUse", session_id: "s2", tool_name: "Bash", tool_input: { command } });
+    const reasonOf = async (command: string) => (await pre(command)).hookSpecificOutput!.permissionDecisionReason!;
+    const receiptOf = (text: string) => JSON.parse(readFileSync(join(ruleDir, "receipts", `${/receipt ([0-9a-f-]{36})/.exec(text)![1]}.json`), "utf8")) as ReceiptBundle;
+
+    beforeAll(() => {
+      ruleDir = mkdtempSync(join(tmpdir(), "agent-custody-sdk-reason-"));
+      const key = writeKeyPair(generateKeyPair(), join(ruleDir, "keys"), "app");
+      writeFileSync(join(ruleDir, "policy.cedar"), RULES);
+      writeFileSync(join(ruleDir, "sdk.json"), JSON.stringify({ agentId: "claude-code", identity: { keyFile: "keys/app.key" }, policyFile: "policy.cedar", receiptsDir: "receipts", logFile: "log.jsonl", framework: "test" }));
+      ruleSdk = createSdkIssuer(loadSdkConfig(join(ruleDir, "sdk.json")));
+      ruleOpts = { issuerKeys: [loadPublicKey(key.pubFile)], principalKeys: [], logFile: join(ruleDir, "log.jsonl") };
+    });
+
+    it("names what the rule forbids, then the rule id and the receipt id", async () => {
+      expect(await reasonOf("git push --force origin main")).toMatch(/^agent-custody denied this call: force push rewrites shared history \(rule policy1, receipt [0-9a-f-]{36}\)$/);
+    });
+
+    it("falls back to the rule id for a rule with no annotation", async () => {
+      expect(await reasonOf("git commit --no-verify")).toMatch(/^agent-custody denied this call: policy3 \(rule policy3, receipt [0-9a-f-]{36}\)$/);
+    });
+
+    it("joins the reasons of several rules with a semicolon", async () => {
+      const text = await reasonOf("git push --force && rm -rf ~ && git commit --no-verify");
+      expect(text).toMatch(/^agent-custody denied this call: force push rewrites shared history; rm -rf on the home directory; policy3 \(rules policy1, policy2, policy3, receipt /);
+    });
+
+    it("keeps the receipt as before: the rule ids, the plain reason, and a signature that verifies", async () => {
+      const text = await reasonOf("rm -rf ~");
+      const bundle = receiptOf(text);
+      const st = decode(bundle);
+      expect(st.predicate.policy).toMatchObject({ decision: "deny", reasons: ["policy2"], errors: [] });
+      expect(st.predicate.execution).toMatchObject({ status: "denied", reason: "policy2" });
+      expect(JSON.stringify(st)).not.toContain("rm -rf on the home directory");
+      expect(failing(verifyBundle(bundle, ruleOpts))).toEqual([]);
+    });
+
+    it("keeps the plain text when the deny names no rule", async () => {
+      const out = await handleHookEvent(sdk, { hook_event_name: "PreToolUse", tool_name: "stripe.refund", tool_input: { amount: 999999 } });
+      expect(out.hookSpecificOutput!.permissionDecisionReason).toMatch(/^agent-custody: no permit policy matched \(receipt [0-9a-f-]{36}\)$/);
+    });
+  });
+
   it("PreToolUse: still denies when the receipt cannot be recorded", async () => {
     const broken = { ...sdk, record: () => Promise.reject(new Error("log unreachable")) };
     const out = await handleHookEvent(broken, { hook_event_name: "PreToolUse", tool_name: "stripe.refund", tool_input: { amount: 999999 } });

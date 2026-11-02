@@ -57,6 +57,7 @@
   "files": [
     "dist",
     "docs",
+    "templates",
     "vectors"
   ],
   "scripts": {

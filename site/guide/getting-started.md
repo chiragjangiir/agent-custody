@@ -2,6 +2,22 @@
 
 Two paths. The **SDK path** records what the agent's own process reports: the quickest way to a receipt, and every field in it is the agent's word (`claimed`). The **gateway path** puts a process the agent does not control between it and the tools, so a call can be denied before it runs and a stranger can accept the record. Start with the SDK to see a receipt today; move a tool to the gateway when its call moves money or touches production. Either path runs in observe mode first, `"mode": "observe"` in the config, recording what the policy would deny without blocking anything, until the policy is right.
 
+## Claude Code in one command
+
+For your own Claude Code sessions, one command does the setup and prints each step: an agent key, a config in observe mode, a starter deny policy (force push, `rm -rf` on `/`, `~`, and `$HOME`, `terraform destroy`, `drop database`), and the three hooks.
+
+```bash
+npx @agent-custody/receipts init claude-code
+```
+
+Work in Claude Code as usual. Nothing is blocked, and the receipts stay on your machine. Then read what the policy would have denied:
+
+```bash
+agent-custody report --config ~/.config/agent-custody/sdk.json
+```
+
+`init` prints this command with absolute paths. To enforce the policy, remove the `"mode": "observe"` line from `sdk.json`. The options are on [the Claude Code page](/reference/claude-code#one-command).
+
 ## Pick your stack
 
 Install the package, make a key and a config once, then add the lines for your framework: Claude Code, the Claude Agent SDK, the OpenAI Agents SDK, LangChain, Vercel AI, OpenClaw, DeepSeek Harness, Hermes, Google ADK, or plain Python. Each produces a receipt in `receipts/` that [the browser verifier](/verify) checks with the `.pub` file.

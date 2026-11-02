@@ -1,5 +1,6 @@
 // Adapter for Claude Code hooks (command hooks over stdin/stdout) and the Claude Agent SDK (in-process hooks).
 // Both use the same input and output JSON, so one handler serves both.
+import { reasonOfRule, type PolicyDecision } from "../policy.ts";
 import { createSdkIssuer, receiptIdOf, type SdkIssuer, type ToolEvent, denies } from "./index.ts";
 
 export interface HookInput {
@@ -20,6 +21,14 @@ export interface HookOutput {
     permissionDecision?: "allow" | "deny" | "ask";
     permissionDecisionReason?: string;
   };
+}
+
+/** What Claude Code and the person see. A rule with a `@reason` gives its text; any other rule gives its id. The rules are in file order. A deny with no rule keeps the plain text. */
+function denialText(issuer: SdkIssuer, policy: PolicyDecision, reason: string, evidence: string): string {
+  if (policy.reasons.length === 0) return `agent-custody: ${reason} (${evidence})`;
+  const ids = [...policy.reasons].sort((a, b) => Number(a.replace(/^policy/, "")) - Number(b.replace(/^policy/, "")));
+  const said = [...ids.map((id) => reasonOfRule(id, issuer.ruleReasons)), ...policy.errors].join("; ");
+  return `agent-custody denied this call: ${said} (${ids.length === 1 ? "rule" : "rules"} ${ids.join(", ")}, ${evidence})`;
 }
 
 function toEvent(input: HookInput): ToolEvent {
@@ -52,7 +61,7 @@ export async function handleHookEvent(issuer: SdkIssuer, input: HookInput): Prom
           hookSpecificOutput: {
             hookEventName: "PreToolUse",
             permissionDecision: "deny",
-            permissionDecisionReason: `agent-custody: ${reason} (${evidence})`,
+            permissionDecisionReason: denialText(issuer, policy, reason, evidence),
           },
         };
       }

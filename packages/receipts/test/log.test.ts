@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -79,5 +79,44 @@ describe("Merkle log", () => {
     expect(verifyConsistency(2, heads[1]!.rootHash, 6, heads[5]!.rootHash, log.consistencyProof(2, 6))).toBe(true);
     expect(verifyConsistency(2, heads[1]!.rootHash, 5, heads[4]!.rootHash, log.consistencyProof(2, 5))).toBe(true);
     expect(() => log.consistencyProof(4, 3)).toThrow(/out of range/);
+  });
+});
+
+describe("Merkle log shared by several processes", () => {
+  it("a second handle on the same file appends after the first handle's leaves, and both stay in step", () => {
+    const file = join(mkdtempSync(join(tmpdir(), "mlog-")), "log.jsonl");
+    const a = new MerkleLog(file);
+    const b = new MerkleLog(file);
+    const first = a.append("from a");
+    const second = b.append("from b");
+    const third = a.append("from a again");
+    expect([first.leafIndex, second.leafIndex, third.leafIndex]).toEqual([0, 1, 2]);
+    expect(third.rootHash).toBe(MerkleLog.rootFromFile(file, 3));
+    expect(verifyInclusion(leafHash("from b"), second, second.rootHash)).toBe(true);
+    expect(a.size).toBe(3);
+    expect(new MerkleLog(file).root()).toBe(third.rootHash);
+  });
+
+  it("leaves no lock file behind, and breaks a lock that a crashed process left", () => {
+    const file = join(mkdtempSync(join(tmpdir(), "mlog-")), "log.jsonl");
+    const log = new MerkleLog(file);
+    log.append("x");
+    expect(existsSync(`${file}.lock`)).toBe(false);
+    writeFileSync(`${file}.lock`, "99999\n");
+    const old = new Date(Date.now() - 60_000);
+    utimesSync(`${file}.lock`, old, old);
+    expect(log.append("y").leafIndex).toBe(1);
+    expect(existsSync(`${file}.lock`)).toBe(false);
+  });
+
+  it("follows a file that another process rewrote shorter", () => {
+    const file = join(mkdtempSync(join(tmpdir(), "mlog-")), "log.jsonl");
+    const log = new MerkleLog(file);
+    log.append("a");
+    log.append("b");
+    writeFileSync(file, `${JSON.stringify("z")}\n`);
+    const next = log.append("c");
+    expect([next.leafIndex, next.treeSize]).toEqual([1, 2]);
+    expect(next.rootHash).toBe(MerkleLog.rootFromFile(file, 2));
   });
 });

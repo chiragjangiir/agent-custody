@@ -38,6 +38,88 @@ Policies see `context.args` and an empty `context.facts`. A policy that reads `c
 
 ## Claude Code
 
+### One command
+
+```bash
+npx @agent-custody/receipts init claude-code
+```
+
+The command sets up custody for your own Claude Code sessions. It prints each step.
+
+1. It makes an agent key in `~/.config/agent-custody/keys/`.
+2. It writes `sdk.json` in `~/.config/agent-custody/` with `"mode": "observe"` and a `receiptsDir`. No log is configured, so the receipts stay on your machine.
+3. It writes a starter deny set to `policy.cedar`: force push, `rm -rf` on `/`, `~`, and `$HOME`, `terraform destroy`, `terraform apply -destroy`, and `drop database` in both cases. Each rule has a `@reason`, so the denial text says what the rule forbids. The policy permits every other call, and it permits `git push --force-with-lease` (see [The starter deny set](#the-starter-deny-set)).
+4. It registers the `PreToolUse`, `PostToolUse`, and `PostToolUseFailure` hooks in `.claude/settings.local.json` of the current directory. Claude Code adds that file to your global git ignore only when Claude Code itself creates it, so `init` does not rely on that. When the project is a git repository and git does not ignore the file, `init` prints a warning with the line to add to `.gitignore`: `.claude/settings.local.json`. The file holds absolute paths of your home directory. `init` never edits `.gitignore`. With `--user`, the hooks go to `~/.claude/settings.json` and apply to every project.
+5. It prints the next step: start a Claude Code session, then run the report.
+
+The hook command in the settings file uses absolute paths: the Node binary, the CLI script that runs now, and the absolute path of `sdk.json`. The command merges into an existing settings file. It keeps every other key and every other hook, and it does not add a hook that is already there. If the settings file is not valid JSON, the command stops with an error and changes nothing.
+
+Each hook is its own process, and Claude Code runs hooks at the same time for parallel tool calls, subagents, and several sessions. The local log `log.jsonl` takes the lock file `log.jsonl.lock` for each append, reads the leaves that other processes appended, and then writes its own leaf. A lock file that is older than ten seconds belongs to a process that died, and the next append removes it.
+
+The hook command pins the path of the Node binary that runs `init`. With nvm, a removed Node version breaks the hook, and every tool call then prints an error. After you remove a Node version, run `init` again. The second run updates the path.
+
+You can run the command two times. It never overwrites an existing key, `sdk.json`, `policy.cedar`, or `log.pub`, so your edits and your pinned log key stay. When `sdk.json` exists, the command ignores `--enforce` and the log options, and it prints a warning that names each flag that it did not apply. A second run does update the path in a hook of ours. When the first run came from the npx cache (a path with `/_npx/`), the command prints a warning, because npm can clear that cache and the hooks then stop working. Install the package globally with `npm install -g @agent-custody/receipts` and run the command again. The second run replaces the old path.
+
+| option | effect |
+| --- | --- |
+| `--dir <dir>` | the directory for the key, the config, the policy, and the receipts. Default: `~/.config/agent-custody` |
+| `--user` | write the hooks to `~/.claude/settings.json` |
+| `--enforce` | leave out `"mode": "observe"`, so a denied call is blocked |
+| `--log-url <url>` | send the receipts to a log as hashes (`hashOnly`, a 3 second timeout) instead of a local `log.jsonl`. It needs `--log-key`: without the key of the log, `report` cannot check the tree head of any receipt, so the command stops with an error |
+| `--log-id <id>` | the log id that the tree heads must name |
+| `--log-token-env NAME` | the NAME of the environment variable that holds the log token. Default: `AGENT_CUSTODY_LOG_TOKEN`. The command refuses a value that is not an uppercase variable name, so a token never enters a file |
+| `--log-key <pub>` | the log's public key file, in PEM form. The command refuses a private key and any other file. It copies the file to `log.pub` and pins it in `log.keys` when it writes a new `sdk.json`. A second run does not replace `log.pub` |
+
+### The starter deny set
+
+Each rule matches the text of a Bash command with the Cedar `like` operator, and `*` is the only wildcard of `like`. The rules catch the plain form of each command. They are not a sandbox.
+
+| command | the policy |
+| --- | --- |
+| `git push --force`, `git push -f`, `git push origin main -f` | denied |
+| `git push --force-with-lease` | allowed. It is a force push that fails when the remote has new commits, so it is the safer form. The `@reason` of the rule says so |
+| `git push origin main && rm -f stale.lock`, `git push origin fix-f` | allowed |
+| `rm -rf /`, `rm -fr /`, `rm -rf /*`, `rm -rf ~`, `rm -rf $HOME`, `rm -rf ${HOME}` | denied |
+| `rm -rf /tmp/build`, `rm -rf ~/projects/app/dist` | allowed |
+| `terraform destroy`, `terraform apply -destroy` | denied |
+| `terraform plan`, `terraform plan -destroy` | allowed |
+
+A `--force` flag matches anywhere after `git push`. A `-f` flag matches right after `git push` or at the end of the command. A `-f` in the middle of a command does not match. The reason is that `like` cannot find where one shell command ends and the next starts, and a match there would block `git push origin main && rm -f stale.lock`. `test/claude-init.test.ts` runs every command of this table.
+
+### The denial text
+
+A Cedar policy can carry a `@reason("...")` annotation. When a rule that denies a call has one, the hook returns its text. When several rules deny the call, the hook joins their reasons with `; ` in file order and lists the rules.
+
+```cedar
+@reason("terraform destroy deletes infrastructure")
+forbid(principal, action == Action::"Bash", resource)
+when { context.args has command && context.args.command like "*terraform destroy*" };
+```
+
+```text
+agent-custody denied this call: terraform destroy deletes infrastructure (rule policy5, receipt 47eb52af-...)
+```
+
+A rule with no annotation gives its id in place of the reason: `agent-custody denied this call: policy3 (rule policy3, receipt ...)`. A deny that names no rule keeps the plain text, such as `agent-custody: no permit policy matched (receipt ...)` or the evaluation error. The issuer parses the annotations one time, when it loads the policy.
+
+The receipt does not change. It keeps the policy ids and the policy digest, and its `execution.reason` stays the list of ids. The reason text is for the agent and for the person who reads the session. The other adapters in this file still return the rule ids.
+
+### The report
+
+```bash
+agent-custody report --config ~/.config/agent-custody/sdk.json
+```
+
+`init` prints this command with absolute paths. The report reads the receipts directory of the config and verifies each receipt with the agent's key. Then it prints `would have denied N calls`, and for each call the tool, the command or the file path, the `@reason` of the rule when it has one, the Cedar rule, and the receipt id. A receipt that does not verify is counted apart, listed with the reason, and never counted as a denial. The command then exits with code 1. The report ends with the next step: remove the `"mode": "observe"` line from `sdk.json` to enforce the policy. A denial that the policy enforced (a config without the observe line) is listed apart as `denied`.
+
+`policy simulate` answers another question: what a proposed policy would change in recorded history. Use `report` to read what the policy in the config decided in observe mode.
+
+### An incident replay
+
+`node examples/38-incident-replay.ts` runs the hook in enforce mode with scripted events. `terraform plan` runs. `terraform destroy -auto-approve` and `rm -rf ~` are denied before they run, and a reviewer verifies the denial receipts with the public key only. The page [An incident replay](../../../site/guide/incident-replay.md) shows the output and the limit: a credential in the agent's environment goes around the hook.
+
+### Register the hook by hand
+
 Register the hook command in `.claude/settings.json`. The same command handles all three events.
 
 ```json
@@ -58,7 +140,7 @@ Register the hook command in `.claude/settings.json`. The same command handles a
 
 `AGENT_CUSTODY_CONFIG` works instead of `--config`. Behaviour per event:
 
-- **PreToolUse.** Evaluates the policy. On deny, issues a denial receipt and returns `permissionDecision: "deny"` with the receipt id in the reason. If the log does not take the receipt, the hook still denies the call, and the reason says `no receipt` and why. On allow, or with no policy, returns no decision, so Claude Code's own permission prompts still apply. The hook never auto-approves.
+- **PreToolUse.** Evaluates the policy. On deny, issues a denial receipt and returns `permissionDecision: "deny"` with a reason that says what the rule forbids: `agent-custody denied this call: terraform destroy deletes infrastructure (rule policy5, receipt <id>)`. See [The denial text](#the-denial-text). If the log does not take the receipt, the hook still denies the call, and the text ends with `no receipt` and why instead of the receipt id. On allow, or with no policy, returns no decision, so Claude Code's own permission prompts still apply. The hook never auto-approves.
 - **PostToolUse.** Issues an executed receipt carrying `tool_response`.
 - **PostToolUseFailure.** Issues a failed receipt.
 

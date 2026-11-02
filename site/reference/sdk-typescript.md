@@ -44,6 +44,7 @@ interface SdkIssuer {
   agentId: string;
   keyid: string;
   log: LogSink;                                             // { kind: "file" | "http", where, append(leaf) }
+  ruleReasons: readonly (string | null)[];                  // the @reason of each policy in the file, in order, or null
   decide(ev: ToolEvent): PolicyDecision | null;
   record(ev: ToolEvent, outcome: Outcome, policy?: PolicyDecision | null): Promise<ReceiptBundle>;
   wrap<A, R>(tool: string, fn: (args: A) => R | Promise<R>, meta?: { model?, session? }): (args: A) => Promise<R>;

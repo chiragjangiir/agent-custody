@@ -36,6 +36,26 @@ export function policyParseErrors(policyText: string): string[] {
   return parsed.type === "success" ? [] : parsed.errors.map((e) => e.message);
 }
 
+/** The text of each static policy, in file order. Cedar names them `policy0`, `policy1`, and so on in this order. */
+export function policyRules(policyText: string): string[] {
+  const parts = cedar.policySetTextToParts(policyText);
+  return parts.type === "success" ? parts.policies : [];
+}
+
+/** The `@reason("...")` annotation of each static policy, in file order, or null for a policy without one. */
+export function policyReasons(policyText: string): (string | null)[] {
+  return policyRules(policyText).map((rule) => {
+    const j = cedar.policyToJson(rule);
+    const reason = j.type === "success" ? j.json.annotations?.reason : undefined;
+    return typeof reason === "string" && reason.trim() ? reason.trim() : null;
+  });
+}
+
+/** The reason of the policy that a Cedar id such as `policy3` names: its `@reason` text, or the id when it has none. */
+export function reasonOfRule(id: string, reasons: readonly (string | null)[]): string {
+  return reasons[Number(id.replace(/^policy/, ""))] ?? id;
+}
+
 export function policyDigest(policyText: string): string {
   return sha256Hex(policyText);
 }

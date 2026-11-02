@@ -8,7 +8,7 @@ import { digestOf, loadPrivateKey } from "../crypto.ts";
 import { createIssuer } from "../issue.ts";
 import { openExporter } from "../otel.ts";
 import { openLog, type LogSink } from "../log-sink.ts";
-import { evaluate, type PolicyDecision } from "../policy.ts";
+import { evaluate, policyReasons, type PolicyDecision } from "../policy.ts";
 import type { ReceiptBundle, ReceiptPredicate } from "../receipt.ts";
 
 export const SDK_VERSION = "0.1.0";
@@ -30,6 +30,8 @@ export interface SdkIssuer {
   keyid: string;
   /** where the leaves go: the local file or the remote log */
   log: LogSink;
+  /** The `@reason` text of each policy in the policy file, in file order, or null for a policy without one. Parsed once at load. */
+  ruleReasons: readonly (string | null)[];
   /** Evaluates the configured policy for a call. Returns null when no policy is configured. */
   decide(ev: ToolEvent): PolicyDecision | null;
   /** Issues one receipt for a completed, failed, denied, or errored call. Rejects if the log refuses it. */
@@ -66,6 +68,8 @@ export function createSdkIssuer(cfg: SdkConfig): SdkIssuer {
   const issuer = createIssuer(key, cfg.receiptsDir, openLog(cfg, key), { exporter: openExporter(cfg), capture: { rules: cfg.capture, key: captureKey } });
   const policyText = cfg.policyFile ? readFileSync(cfg.policyFile, "utf8") : null;
 
+  const ruleReasons = policyText === null ? [] : policyReasons(policyText);
+
   const decide = (ev: ToolEvent): PolicyDecision | null => {
     if (policyText === null) return null;
     const d = evaluate(policyText, { agentId: cfg.agentId, tool: ev.tool, context: { args: ev.args, facts: {} } });
@@ -100,6 +104,7 @@ export function createSdkIssuer(cfg: SdkConfig): SdkIssuer {
     agentId: cfg.agentId,
     keyid: issuer.keyid,
     log: issuer.log,
+    ruleReasons,
     decide,
     record,
     wrap(tool, fn, meta = {}) {
