@@ -31,6 +31,7 @@ Claude Code writes the hook event as JSON on stdin. The fields the handler reads
 | event | what the handler does | stdout |
 | --- | --- | --- |
 | `PreToolUse`, policy denies | issues a **denied** receipt, blocks the call | `{ "continue": true, "hookSpecificOutput": { "hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "agent-custody: policy1 (receipt 47eb52af-…)" } }` |
+| `PreToolUse`, policy denies, the receipt cannot be recorded | blocks the call | the same, with `(no receipt: <why>)` in the reason |
 | `PreToolUse`, policy allows or none | nothing | `{}`: Claude Code's own permission prompts still apply; the hook never auto-approves |
 | `PostToolUse` | issues an **executed** receipt with `tool_response` as the result | `{}` |
 | `PostToolUseFailure` | issues a **failed** receipt with the error as the result | `{}` |

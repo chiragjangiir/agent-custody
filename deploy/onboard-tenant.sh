@@ -60,10 +60,10 @@ hashOnly means this log never receives your receipts, only their hashes. Your re
 
 --- For whoever verifies your receipts ----------------------------------------
 
-  npx agent-custody verify receipts/<id>.json --issuer-key <your gateway.pub> --principal-key <your principal.pub> \\
+  npx @agent-custody/receipts verify receipts/<id>.json --issuer-key <your gateway.pub> --principal-key <your principal.pub> \\
       --log-url https://$log_host/t/$tenant/ --log-id $log_id
 
-  npx agent-custody audit --older receipts/<earlier>.json --newer receipts/<later>.json \\
+  npx @agent-custody/receipts audit --older receipts/<earlier>.json --newer receipts/<later>.json \\
       --log-url https://$log_host/t/$tenant/ --log-id $log_id
 
 --log-url fetches this log's published keys and pins them; --log-id makes sure the tree heads are this log's.

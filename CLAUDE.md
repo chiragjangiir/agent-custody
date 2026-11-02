@@ -31,4 +31,4 @@ Before you work in an area, read its rules:
 - Tests never use the network. A timeout on a loaded machine is not a failure.
 - Regenerate `packages/receipts/vectors/` only when the receipt format or a check changes, never to make a test pass. A check added or renamed in `src/verify.ts` gets the same change in `site/verifier/verify-web.ts`.
 
-The custody hook in `.claude/` makes each tool call of a session a receipt and refuses force pushes. "This repository is built under custody" in the root README explains it.
+On a machine with `~/.config/agent-custody/hook.sh`, the custody hook in `.claude/` makes each tool call of a session a receipt and refuses force pushes. On any other machine it does nothing. "Agent sessions in this repository" in the root README explains it.

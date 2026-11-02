@@ -102,7 +102,7 @@ export default withMermaid(
           { text: "Use cases, with their policies", link: "/use-cases" },
           { text: "Getting started", link: "/guide/getting-started" },
           { text: "Architecture", link: "/guide/architecture" }, { text: "Deployment", link: "/guide/deployment" },
-          { text: "This repository, under custody", link: "/custody" },
+          { text: "Agent sessions in this repository", link: "/custody" },
           { text: "Changelog", link: "/changelog" },
         ] },
         { text: "Writing", items: [{ text: "All pieces", link: "/blog/" }, { text: "Risk-tiered merges, with evidence", link: "/blog/risk-tiered-merges-with-evidence" }, { text: "Logs are claims. Receipts are evidence.", link: "/blog/logs-are-claims" }] },

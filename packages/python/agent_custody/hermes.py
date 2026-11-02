@@ -51,6 +51,6 @@ def register_hermes(ctx: Any, client: Client) -> None:
 
 def register(ctx: Any) -> None:
     """The plugin entry point Hermes calls once at startup. The sidecar URL comes from the plugin's settings
-    (`sidecar_url`, default http://127.0.0.1:8791), the same sidecar every other Python adapter uses."""
-    url = ctx.get_config("sidecar_url", default="http://127.0.0.1:8791") if hasattr(ctx, "get_config") else "http://127.0.0.1:8791"
+    (`sidecar_url`, default http://127.0.0.1:8788), the same sidecar every other Python adapter uses."""
+    url = ctx.get_config("sidecar_url", default="http://127.0.0.1:8788") if hasattr(ctx, "get_config") else "http://127.0.0.1:8788"
     register_hermes(ctx, Client(url))

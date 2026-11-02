@@ -109,6 +109,6 @@ step(4, "the full report for the refused write, the one an auditor asks about");
 console.log(formatReport(await verifyBundle(JSON.parse(readFileSync(join(receiptsDir, denied), "utf8")), { issuerKeys: [key], principalKeys: [], logFile: join(dir, "log.jsonl") })).split("\n").map((l) => "   " + l).join("\n"));
 
 step(5, "the same from the shell, or drop the file on https://agent-custody.dev/verify");
-console.log(`   npx agent-custody verify ${join(receiptsDir, denied)} --issuer-key ${app.pubFile} --log ${join(dir, "log.jsonl")}`);
+console.log(`   npx @agent-custody/receipts verify ${join(receiptsDir, denied)} --issuer-key ${app.pubFile} --log ${join(dir, "log.jsonl")}`);
 
 console.log("\nOK");

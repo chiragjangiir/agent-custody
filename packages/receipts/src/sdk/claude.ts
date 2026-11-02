@@ -40,13 +40,19 @@ export async function handleHookEvent(issuer: SdkIssuer, input: HookInput): Prom
       const policy = issuer.decide(ev);
       if (denies(policy)) {
         const reason = [...policy.reasons, ...policy.errors].join("; ") || "no permit policy matched";
-        const bundle = await issuer.record(ev, { status: "denied", reason }, policy);
+        // A hook that throws does not block the call, so a log outage must not cost the denial.
+        let evidence: string;
+        try {
+          evidence = `receipt ${receiptIdOf(await issuer.record(ev, { status: "denied", reason }, policy))}`;
+        } catch (e) {
+          evidence = `no receipt: ${e instanceof Error ? e.message : String(e)}`;
+        }
         return {
           continue: true,
           hookSpecificOutput: {
             hookEventName: "PreToolUse",
             permissionDecision: "deny",
-            permissionDecisionReason: `agent-custody: ${reason} (receipt ${receiptIdOf(bundle)})`,
+            permissionDecisionReason: `agent-custody: ${reason} (${evidence})`,
           },
         };
       }

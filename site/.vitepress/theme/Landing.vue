@@ -303,7 +303,7 @@ const keywords = (code: string) => code.split(/(\bpermit\b|\bwhen\b)/).map((s) =
             <div class="card"><h3>Payments and refunds</h3><p>Refund within a limit, for a customer the gateway verified.</p><div class="links"><a href="#story">The demo above →</a><a :href="example('17-rest-upstream.ts')">Example 17: a REST upstream →</a></div></div>
             <div class="card"><h3>Agents that write code</h3><p>Risk-tiered merges. Change-management evidence for SOC 2 and ISO 27001.</p><div class="links"><a href="/blog/risk-tiered-merges-with-evidence">Risk-tiered merges, with evidence →</a><a :href="example('24-agentic-cicd-merge-gate.ts')">Example 24: the merge gate →</a></div></div>
             <div class="card"><h3>Knowledge bases</h3><p>Read anything, write only under notes/, with a source.</p><div class="links"><a href="/demo-langchain-kb.mp4">A 22-second film →</a><a :href="example('23-langchain-kb-agent.ts')">Example 23: LangChain →</a></div></div>
-            <div class="card"><h3>Your own repository</h3><p>Every Claude Code tool call as a receipt. This repository runs that way.</p><div class="links"><a href="/custody">Under custody →</a><a href="/reference/claude-code">The hook →</a></div></div>
+            <div class="card"><h3>Your own repository</h3><p>Every Claude Code tool call as a receipt.</p><div class="links"><a href="/custody">This repository →</a><a href="/reference/claude-code">The hook →</a></div></div>
           </div>
         </div>
       </section>

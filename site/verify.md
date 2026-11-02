@@ -12,4 +12,4 @@ Paste a receipt bundle and the public keys it should verify against. The report 
 - **Log keys** are needed only when the receipt was logged to a remote log, whose key signs the tree head.
 - **A copy of the log** is optional. With it, the verifier recomputes the root at the tree head's size and compares.
 
-The same checks from the shell: `npx agent-custody verify receipts/<id>.json --issuer-key keys/app.pub --log log.jsonl`. [Verifying a receipt](/receipts/verification) explains each check and what a verified receipt does and does not prove.
+The same checks from the shell: `npx @agent-custody/receipts verify receipts/<id>.json --issuer-key keys/app.pub --log log.jsonl`. [Verifying a receipt](/receipts/verification) explains each check and what a verified receipt does and does not prove.

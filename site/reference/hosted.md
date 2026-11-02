@@ -18,7 +18,7 @@ Retry-After: <seconds to the start of next month>
 { "error": "monthly quota reached: 10000 of 10000 appends on the free plan; it resets at the start of next month, or move to a larger plan" }
 ```
 
-The gateway's log client retries a 429 three times with backoff and then fails the call: a pre-committed call is withheld, any other returns an error to the agent. Nothing acts without evidence. See [pricing](https://agent-custody.dev/pricing).
+The gateway's log client retries a 429 three times with backoff and then treats the append as failed. A pre-committed call and a financial operation are not forwarded: the call returns an error. Any other call is forwarded and returns its real result marked `log-pending`, and its receipt waits in the outbox until the log takes it. In strict mode every call is pre-committed. See [pricing](https://agent-custody.dev/pricing).
 
 ## Registering: the portal
 

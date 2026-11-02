@@ -58,7 +58,7 @@ Register the hook command in `.claude/settings.json`. The same command handles a
 
 `AGENT_CUSTODY_CONFIG` works instead of `--config`. Behaviour per event:
 
-- **PreToolUse.** Evaluates the policy. On deny, issues a denial receipt and returns `permissionDecision: "deny"` with the receipt id in the reason. On allow, or with no policy, returns no decision, so Claude Code's own permission prompts still apply. The hook never auto-approves.
+- **PreToolUse.** Evaluates the policy. On deny, issues a denial receipt and returns `permissionDecision: "deny"` with the receipt id in the reason. If the log does not take the receipt, the hook still denies the call, and the reason says `no receipt` and why. On allow, or with no policy, returns no decision, so Claude Code's own permission prompts still apply. The hook never auto-approves.
 - **PostToolUse.** Issues an executed receipt carrying `tool_response`.
 - **PostToolUseFailure.** Issues a failed receipt.
 

@@ -7,7 +7,7 @@ description: "Where a receipt earns its keep, by the kind of team running the ag
 
 Every entry here follows the same shape, because the product does: the call that matters, a policy the gateway evaluates on facts it fetched itself, what the receipt proves, and who outside the team can verify it. Every policy below is checked against the evaluator by the test suite's rules, and four of the eight have a runnable example behind them. Where there is no example yet, it says so.
 
-The pattern is the same everywhere. The gateway sits between the agent and the tool, in your infrastructure. Nothing about the agent changes. What changes is that the decision is made outside it, and that the record of the decision is signed by a key the agent does not hold and anchored in a log the operator cannot rewrite alone. See [what a receipt proves](/receipts/#what-a-receipt-proves-and-what-it-does-not) for the exact claims.
+The pattern is the same everywhere. The gateway sits between the agent and the tool, in your infrastructure. Nothing about the agent changes. What changes is that the decision is made outside it, and that the record of the decision is signed by a key the agent does not hold and its hash goes to a tamper-evident log, where anyone who kept a checkpoint can detect a rewrite. See [what a receipt proves](/receipts/#what-a-receipt-proves-and-what-it-does-not) for the exact claims.
 
 ## Crypto wallets and on-chain agents
 
@@ -103,7 +103,7 @@ No runnable example yet; the knowledge-base agent in [example 23](https://github
 
 ## Coding agents on your own repository
 
-**The call.** Every shell command, file write, and tool call a Claude Code session makes. This repository runs that way: [this repository, under custody](/custody).
+**The call.** Every shell command, file write, and tool call a Claude Code session makes. See [agent sessions in this repository](/custody).
 
 ## What every case has in common
 

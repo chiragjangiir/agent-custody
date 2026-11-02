@@ -4,7 +4,7 @@ title: Pricing
 
 # Pricing
 
-Everything you run yourself, the gateway, the SDK, the ledger, the verifier, is open source under Apache-2.0 and costs nothing. What is priced is the hosted log: a transparency log run by someone who is not you, so your receipts can be accepted by people who do not trust you. It holds hashes, never receipts. The unit is appends, one per receipt, counted per calendar month.
+Everything you run yourself, the gateway, the SDK, the ledger, the verifier, is open source under Apache-2.0 and costs nothing. What is priced is the hosted log: a transparency log run by someone who is not you, so your receipts can be accepted by people who do not trust you. It holds hashes, never receipts. The unit is appends, counted per calendar month.
 
 | | Free | Team | Enterprise |
 | --- | --- | --- | --- |
@@ -22,7 +22,7 @@ Everything you run yourself, the gateway, the SDK, the ledger, the verifier, is 
 
 ## What 10,000 appends is
 
-One append per receipt, one receipt per tool call, allowed or denied. A worked week, with round numbers:
+One append per receipt, one receipt per tool call, allowed or denied. An allowed call to a tool in `precommit` (every tool, in strict mode), or to a financial operation, uses two appends: the signed authorization before the call and the receipt after it. A worked week, with round numbers and one append per call:
 
 | who | tool calls | appends a day | appends a month | plan |
 | --- | --- | --- | --- | --- |
@@ -40,7 +40,7 @@ No plan carries an availability commitment yet. The log runs on one machine with
 
 ## What happens at the allowance
 
-An append past the month's allowance is refused with a clear message and the date it resets; the gateway behind it withholds pre-committed calls and errors on the rest, so nothing acts without a receipt. Upgrade from the billing page and the next append lands. Nothing already logged is affected.
+An append past the month's allowance is refused with a clear message and the date it resets. The gateway behind it withholds pre-committed calls and financial operations, so they do not run. An ordinary tool call still runs, and its receipt waits in the gateway's outbox until the log takes it. Upgrade from the billing page and the next append lands. Nothing already logged is affected.
 
 ## Paying
 

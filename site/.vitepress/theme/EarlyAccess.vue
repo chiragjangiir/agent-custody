@@ -70,7 +70,7 @@ const copied = ref(false);
     <label>Anything else<textarea v-model="note" rows="2"></textarea></label>
     <div class="row">
       <button type="submit" :disabled="busy || sent">{{ sent ? "Sent" : busy ? "Sending…" : opened ? "Open my mail app again" : "Request early access" }}</button>
-      <span v-if="sent" class="ok">Thank you. We answer every request, and the first tenants set the price with us.</span>
+      <span v-if="sent" class="ok">Thank you. We answer every request.</span>
       <span v-else-if="opened" class="ok">Your mail app should have opened with the request filled in; send it from there. If nothing opened, <button type="button" class="link" @click="copyRequest">{{ copied ? "copied" : "copy the request" }}</button> and email it to {{ TO }}.</span>
       <span v-if="error" class="err">{{ error }}</span>
     </div>

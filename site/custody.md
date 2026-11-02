@@ -1,8 +1,8 @@
-# This repository, under custody
+# Agent sessions in this repository
 
-agent-custody is built by an AI agent in Claude Code, and every tool call that agent makes here is a receipt. The hook is committed in the repository; the receipts, the signing key, and the log token stay on the maintainer's machine; and the hash of each receipt is committed to our own tenant on the hosted log within seconds of the call. This page is the live evidence, and how to check it yourself.
+agent-custody is built with an AI agent in Claude Code. The hook that records the agent's tool calls is committed in the repository, but it records only on a machine that has its config in `~/.config/agent-custody`. Not every machine that works here has that config. On 2026-11-02 the tenant held six receipts, so most of the work in this repository has no receipt. Where the hook runs, the receipts, the signing key, and the log token stay on that machine, and the hash of each receipt goes to our own tenant on the hosted log within seconds of the call. This page shows the live evidence and how to check it yourself.
 
-## What is recorded
+## What the hook records
 
 | event | what happens |
 | --- | --- |
@@ -16,7 +16,7 @@ Each receipt is signed with the agent's key and its leaf hash is appended to the
 - Its latest published checkpoint: [checkpoints.agent-custody.dev/agent-custody/latest.json](https://checkpoints.agent-custody.dev/agent-custody/latest.json)
 - The log's keys: [/.well-known/agent-custody-log.json](https://log.agent-custody.dev/.well-known/agent-custody-log.json)
 
-The tree size in the head is the number of receipts issued so far. Watch it move.
+The tree size in the head is the number of receipts issued so far.
 
 ## The policy the agent runs under
 

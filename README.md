@@ -10,7 +10,7 @@ It is a chain of custody for both what an agent does and what it believes: autho
 
 | package | what it is | status |
 | --- | --- | --- |
-| [`@agent-custody/receipts`](packages/receipts/README.md) | Signed receipts for tool calls: an MCP gateway with Cedar policy and a Merkle transparency log, an in-process SDK with framework adapters, and an offline verifier | working, thirty runnable tutorials |
+| [`@agent-custody/receipts`](packages/receipts/README.md) | Signed receipts for tool calls: an MCP gateway with Cedar policy and a Merkle transparency log, an in-process SDK with framework adapters, and an offline verifier | working, with runnable tutorials |
 | [`agent-custody` on PyPI](packages/python/README.md) | The Python client of the sidecar: `decide`, `record`, `wrap`, and adapters for LangChain, the OpenAI Agents SDK, the Claude Agent SDK, CrewAI, Google ADK, and a Hermes Agent plugin, tested against the real packages | working; Go, Java, and Rust clients live in [examples/languages](packages/receipts/examples/languages) |
 | [`@agent-custody/state`](packages/state/README.md) | Governed memory: a fact ledger where every write cites the receipt that caused it, carries valid time and transaction time, and can be superseded or rolled back | ledger on JSONL or SQLite, memory server behind the gateway or shared over HTTP, quarantine and verified provenance, blast radius, certified forget, retention and legal holds, write-through to Mem0 and Zep, eval CLI with signed reports |
 
@@ -56,7 +56,7 @@ npm install @agent-custody/receipts @agent-custody/state
 **1. Give the agent's process a signing key and a config.** The key signs every receipt. The config says where receipts and the log go.
 
 ```bash
-npx agent-custody keygen --dir keys --name app
+npx @agent-custody/receipts keygen --dir keys --name app
 ```
 
 ```json
@@ -73,7 +73,7 @@ const issuer = createSdkIssuer(loadSdkConfig("./sdk.json"));
 const lookup = issuer.wrap("crm.lookup", async (args: { id: string }) => crm.lookup(args));   // records every call
 const customer = await lookup({ id: "acct:42" });
 
-const bundle = issuer.record({ tool: "crm.lookup", args: { id: "acct:42" } }, { status: "executed", result: customer });   // or record one by hand and keep the bundle
+const bundle = await issuer.record({ tool: "crm.lookup", args: { id: "acct:42" } }, { status: "executed", result: customer });   // or record one by hand and keep the bundle
 ```
 
 **3. Verify it, offline.** Anyone with the public key and a copy of the log can check the signature, the statement, and the inclusion proof. No access to the agent or the issuer needed.
@@ -85,7 +85,7 @@ verifyBundle(bundle, { issuerKeys: [loadPublicKey("keys/app.pub")], principalKey
 ```
 
 ```bash
-npx agent-custody verify receipts/<id>.json --issuer-key keys/app.pub --log log.jsonl    # the same check from the shell
+npx @agent-custody/receipts verify receipts/<id>.json --issuer-key keys/app.pub --log log.jsonl    # the same check from the shell
 ```
 
 **4. Record what the agent now believes, citing the receipt.** The ledger is bitemporal: it knows when a fact was true and when the agent learned it. A belief points back at the receipt that produced it.
@@ -127,13 +127,13 @@ This whole loop is one runnable file, [packages/state/examples/02-receipt-to-bel
 - Where each piece runs, sized, with what interception does not reach. [Deployment](https://agent-custody.dev/guide/deployment). What each release changed: [changelog](CHANGELOG.md).
 - Register a tenant on the hosted log at [app.agent-custody.dev](https://app.agent-custody.dev/#register) and get a log and a first key at once: free for ten thousand appends a month, [$50 a month](https://agent-custody.dev/pricing) for a million, a dashboard with usage against the plan, keys, and every action taken on the tenant, and an export that takes everything with you.
 - The reference at [docs.agent-custody.dev](https://docs.agent-custody.dev/): every feature, and the exact request and response of every function, endpoint, MCP tool, and command.
-- Want a log run by someone who is not you? [deploy/](deploy/README.md) has the container, a docker compose file for one VM, and Kubernetes manifests to run it on a machine the operator does not control; or take a tenant on the one we run, at [log.agent-custody.dev](https://agent-custody.dev/early-access), free for the first three.
+- Want a log run by someone who is not you? [deploy/](deploy/README.md) has the container, a docker compose file for one VM, and Kubernetes manifests to run it on a machine the operator does not control; or take a tenant on the one we run, at [log.agent-custody.dev](https://agent-custody.dev/early-access), on the [Free or Team plan](https://agent-custody.dev/pricing).
 - Agents in Python, Go, Java, Rust, or anything else: the gateway is an MCP server and needs nothing from your language; for in-process receipts run the sidecar and use the Python package or a forty-line client. [sdk.md](packages/receipts/docs/sdk.md#other-languages-the-sidecar)
-- Twenty-nine step-by-step examples in the receipts package and more in the state package: [receipts tutorials](packages/receipts/docs/tutorials.md), [state examples](packages/state/examples).
+- Step-by-step examples in the receipts package and more in the state package: [receipts tutorials](packages/receipts/docs/tutorials.md), [state examples](packages/state/examples).
 
-## This repository is built under custody
+## Agent sessions in this repository
 
-Every tool call an agent makes in a Claude Code session in this repository becomes a signed receipt, its hash committed to our tenant on the hosted log within seconds; a force push is refused by policy and the refusal is a receipt too. The hook is committed in `.claude/`, the receipts and keys stay outside the repository, and [agent-custody.dev/custody](https://agent-custody.dev/custody) shows the live tenant and sample receipts anyone can verify.
+A Claude Code session in this repository can run under custody. On a machine with the recording config, each tool call becomes a signed receipt, and its hash goes to our tenant on the hosted log within seconds. A force push is refused by policy, and the refusal is a receipt too. A machine without that config records and refuses nothing, so the tenant does not cover all the work in this repository. The hook is committed in `.claude/`, the receipts and keys stay outside the repository, and [agent-custody.dev/custody](https://agent-custody.dev/custody) shows the live tenant and sample receipts anyone can verify.
 
 ## Security
 
@@ -165,4 +165,4 @@ site/                 the website, generated from this repository's markdown by 
 
 ## Plan
 
-The receipts package's roadmap is in [its README](packages/receipts/README.md#plan). The state package has the ledger on JSONL, SQLite, or Postgres with every query answered from an index, the memory server behind the gateway and shared over HTTP, quarantine with three provenance levels and value-level evidence, policy over the fact being changed, consumed facts and blast radius, certified forget with keyed digests and verified removal from stores, retention sweeps and legal holds, the custody pack for counsel, a ledger that lives in a JSONL file, SQLite, or your Postgres, write-through to Mem0 and Zep, and the eval CLI with signed reports; its remaining items are indexed queries at scale, more store adapters, and the hosted plane, each tracked as an issue in [its README](packages/state/README.md#plan).
+The receipts package's roadmap is in [its README](packages/receipts/README.md#plan). The state package has the ledger on JSONL, SQLite, or Postgres with every query answered from an index, the memory server behind the gateway and shared over HTTP, quarantine with three provenance levels and value-level evidence, policy over the fact being changed, consumed facts and blast radius, certified forget with keyed digests and verified removal from stores, retention sweeps and legal holds, the custody pack for counsel, a ledger that lives in a JSONL file, SQLite, or your Postgres, write-through to Mem0 and Zep, and the eval CLI with signed reports; its remaining item is the hosted plane, tracked as an issue in [its README](packages/state/README.md#plan).
