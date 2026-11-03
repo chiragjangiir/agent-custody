@@ -139,6 +139,38 @@ One replica, `Recreate` strategy, a `ReadWriteOnce` volume: a log has one writer
 
 `deploy/witness/` is a separate compose stack: the same image with `ROLE=witness`, and a Caddy serving what it signs. It belongs on a machine and under an account that the log's operator does not control; run on the log's own machine it proves nothing. It needs the log's API URL, the checkpoints URL, and the tenants to watch, generates its own key on first start, and publishes that key at `/.well-known/agent-custody-witness.json` on its host. Every five minutes it fetches each watched log's latest checkpoint, proves it extends the last head it signed with the log's own consistency proof, and countersigns it; a checkpoint that does not extend, or a second history at the same size, gets an `ALARM.json` on the host instead of a signature. Verifiers add `--witness-url https://witness.example.org/` to `audit` and the newer head must then carry the witness's signature. `audit --older` and `--newer` accept checkpoint files from either host as well as receipt bundles.
 
+**Alarm notice.** The witness writes `ALARM.json` and sends no message. Anyone can poll for it from any host with the public URLs, so no token is needed. `log-check` fails the check "witness has raised no alarm" when `<tenant>/ALARM.json` exists on the witness host, and the command then exits 1. The check runs only when `--checkpoints-url` and `--witness-url` are both set. Put this line in the crontab of a machine that is not the log's, and set `MAILTO` so that cron mails the output:
+
+```
+*/10 * * * * out=$(agent-custody log-check --log-url https://log.example.com/ --checkpoints-url https://checkpoints.example.com/ --witness-url https://witness.example.org/ --tenant default --max-lag 900 2>&1) || printf '%s\n' "$out"
+```
+
+The line prints only when a check fails. The witness never deletes `ALARM.json`, so the line keeps failing until the witness operator removes the file after the cause is understood.
+
+**Rotating the witness key.** Run these steps in `deploy/witness/` on the witness host. Keep the `witnessed` volume: it holds `state.json`, the last head the witness signed.
+
+```bash
+docker compose cp witness:/data/keys/witness.pub ./witness-old.pub
+docker compose exec witness sh -c 'mkdir -p /data/keys/retired && mv /data/keys/witness.key /data/keys/retired/$(date +%F).key && mv /data/keys/witness.pub /data/keys/retired/$(date +%F).pub'
+docker compose restart witness
+curl -s https://witness.example.org/.well-known/agent-custody-witness.json      # the new key only
+```
+
+Send `witness-old.pub` and the new key id to every verifier, and keep the old private key offline or destroy it. The next countersignature carries the new key, and the consistency check against the last head continues unchanged.
+
+What the code does not do:
+
+- The key document lists only the current key. The witness writes it again at every start, and it has no retired-key option, unlike the signer. A verifier that reads the key by `--witness-url` cannot verify a countersignature that the old key made.
+- The witness does not sign again at a tree size that it already signed. Until the log grows, `latest.json` keeps the old signature. In that time `log-check --witness-url` fails "witness has countersigned", and `audit --witness-url` fails "newer tree head countersigned by a witness" for that checkpoint.
+- Nothing links the new key to the old one. A verifier cannot tell a rotation from a takeover of the witness host. Confirm the new key id through a second channel.
+- The witness has no revocation list. After a leak, the old key must not stay in any verifier's key list for heads newer than the rotation, and a countersignature carries no signed time that separates the good ones from the forged ones.
+
+What a verifier does after a rotation:
+
+- To check a checkpoint that the old key countersigned, add `--witness-key witness-old.pub`. The option repeats, and it combines with `--witness-url`. One valid signature from any listed key is enough.
+- To check a checkpoint that the new key countersigned, keep `--witness-url`. For a log that stays quiet, wait for the first countersignature at a larger tree size.
+- Remove the old key from the list when it is not needed any more.
+
 ## Hetzner now, AWS later
 
 Yes, and it is the right order. Nothing here depends on a cloud provider: a container, a database, a volume, a hostname, and a certificate. A Hetzner VM runs the compose file as written. Moving to AWS later, when a tenant's procurement asks for it or an integration needs it, is:

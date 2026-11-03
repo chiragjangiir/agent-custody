@@ -15,6 +15,12 @@ import { localSigner } from "../src/signer.ts";
 import { auditExtends } from "../src/verify.ts";
 import { fetchWitnessKeys, Witness } from "../src/witness.ts";
 
+/** The witness's fetch: refuses a call that carries no abort signal, because every outbound fetch needs a timeout. */
+const timedFetch: typeof fetch = async (input, init) => {
+  if (!(init?.signal instanceof AbortSignal)) throw new Error(`fetch without a timeout signal: ${String(input)}`);
+  return fetch(input, init);
+};
+
 /** Serves a directory the way the checkpoints host does. */
 function staticHost(dir: string): Promise<{ server: Server; url: string }> {
   const server = createServer((req, res) => {
@@ -58,7 +64,7 @@ describe("the witness", () => {
     log = await serveLog(resolver, signer, { port: 0, checkpoints: store });
     publisher = new CheckpointPublisher(resolver, signer, store, 60_000);
     host = await staticHost(cpDir());
-    witness = new Witness({ logUrl: log.url, checkpointsUrl: host.url, tenants: ["default"], key: loadPrivateKey(witnessKp.keyFile), outDir: join(dir, "witness"), warn: () => {} });
+    witness = new Witness({ logUrl: log.url, checkpointsUrl: host.url, tenants: ["default"], key: loadPrivateKey(witnessKp.keyFile), outDir: join(dir, "witness"), fetch: timedFetch, warn: () => {} });
   });
   afterAll(async () => {
     await log.close();
@@ -98,7 +104,7 @@ describe("the witness", () => {
     // a verifier fetches the witness's keys from its host, the way it fetches the log's
     const wHost = await staticHost(join(dir, "witness"));
     try {
-      expect((await fetchWitnessKeys(wHost.url)).map((k) => k.keyid)).toEqual([loadPublicKey(witnessKp.pubFile).keyid]);
+      expect((await fetchWitnessKeys(wHost.url, timedFetch)).map((k) => k.keyid)).toEqual([loadPublicKey(witnessKp.pubFile).keyid]);
     } finally {
       wHost.server.close();
     }

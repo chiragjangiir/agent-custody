@@ -83,7 +83,7 @@ export class Witness {
   }
 
   private async logKeys(): Promise<PublicKeyRef[]> {
-    const res = await this.f(new URL("/.well-known/agent-custody-log.json", this.o.logUrl));
+    const res = await this.f(new URL("/.well-known/agent-custody-log.json", this.o.logUrl), { signal: AbortSignal.timeout(10_000) });
     if (!res.ok) throw new Error(`log key document: ${res.status}`);
     const doc = (await res.json()) as KeyDocument;
     return doc.keys.map((k) => publicKeyFromPem(k.publicKeyPem));
@@ -91,7 +91,7 @@ export class Witness {
 
   private async latest(tenant: string): Promise<{ envelope: Envelope } | null> {
     const base = this.o.checkpointsUrl.endsWith("/") ? this.o.checkpointsUrl : `${this.o.checkpointsUrl}/`;
-    const res = await this.f(new URL(`${safe(tenant)}/latest.json`, base));
+    const res = await this.f(new URL(`${safe(tenant)}/latest.json`, base), { signal: AbortSignal.timeout(10_000) });
     if (res.status === 404) return null;
     if (!res.ok) throw new Error(`checkpoint for ${tenant}: ${res.status}`);
     return (await res.json()) as { envelope: Envelope };
@@ -100,7 +100,7 @@ export class Witness {
   private async proof(tenant: string, oldSize: number, newSize: number): Promise<string[]> {
     const base = this.o.logUrl.endsWith("/") ? this.o.logUrl : `${this.o.logUrl}/`;
     const path = tenant === "default" ? `consistency?old=${oldSize}&new=${newSize}` : `t/${tenant}/consistency?old=${oldSize}&new=${newSize}`;
-    const res = await this.f(new URL(path, base));
+    const res = await this.f(new URL(path, base), { signal: AbortSignal.timeout(10_000) });
     if (!res.ok) throw new Error(`consistency proof for ${tenant}: ${res.status}`);
     return ((await res.json()) as { hashes: string[] }).hashes;
   }
