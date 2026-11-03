@@ -23,12 +23,13 @@ function sitePath(repoPath: string): string | null {
 export default withMermaid(
   defineConfig({
     title: "agent-custody",
-    description: "Proof of what your AI agents did: every tool call becomes signed evidence of who authorized it, what the agent saw, what it did, and what depended on it, verifiable by anyone with the public keys.",
+    description: "Stop your coding agent from running destructive commands, and keep a signed record that a reviewer can check.",
     srcDir: "..",
     srcExclude: ["deploy/**", "site/verifier/**", "**/node_modules/**", "**/dist/**", "**/examples-out/**", "**/demo-out/**", "**/.venv/**", "**/target/**", "CLAUDE.md", "CONTRIBUTING.md", "SECURITY.md", "packages/receipts/examples/**", "packages/state/examples/**", "packages/python/tests/**", "site/README.md"],
     rewrites: {
       "site/index.md": "index.md",
       "site/verify.md": "verify.md",
+      "site/advanced.md": "advanced.md",
       "site/early-access.md": "early-access.md",
       "site/security.md": "security.md",
       "site/pricing.md": "pricing.md",
@@ -57,7 +58,7 @@ export default withMermaid(
       ["link", { rel: "apple-touch-icon", sizes: "180x180", href: "/apple-touch-icon.png?v=2" }],
       ["meta", { name: "theme-color", content: "#b45309" }],
       ["meta", { property: "og:title", content: "agent-custody" }],
-      ["meta", { property: "og:description", content: "Proof of what your AI agents did: every tool call becomes signed evidence of who authorized it, what the agent saw, what it did, and what depended on it, verifiable by anyone with the public keys." }],
+      ["meta", { property: "og:description", content: "Stop your coding agent from running destructive commands, and keep a signed record that a reviewer can check." }],
     ],
     // The conformance vectors are published as files next to the spec, straight from the receipts package.
     buildEnd(siteConfig) {
@@ -69,10 +70,11 @@ export default withMermaid(
     lastUpdated: false,
     themeConfig: {
       logo: "/logo.svg?v=2",
-      // Five entries (issue #52). Receipts, State, Python, the spec, and security live in the sidebar under Docs.
+      // Six entries. Receipts, State, Python, the spec, and security live in the sidebar under Docs.
       nav: [
         { text: "Product", link: "/" },
         { text: "Docs", link: "/guide/getting-started" },
+        { text: "Advanced", link: "/advanced" },
         { text: "Pricing", link: "/pricing" },
         { text: "Verify", link: "/verify" },
         { text: "Sign in", link: "https://app.agent-custody.dev/" },
@@ -97,6 +99,7 @@ export default withMermaid(
         ],
         "/": [
         { text: "Start here", items: [
+          { text: "Advanced: everything else", link: "/advanced" },
           { text: "What each piece is for", link: "/guide/pieces" },
           { text: "FAQ: where the data goes", link: "/faq" },
           { text: "Use cases, with their policies", link: "/use-cases" },

@@ -7,8 +7,11 @@ Two paths. The **SDK path** records what the agent's own process reports: the qu
 For your own Claude Code sessions, one command does the setup and prints each step: an agent key, a config in observe mode, a starter deny policy (force push, `rm -rf` on `/`, `~`, and `$HOME`, `terraform destroy`, `drop database`), and the three hooks.
 
 ```bash
-npx @agent-custody/receipts init claude-code
+npm install -g @agent-custody/receipts
+agent-custody init claude-code
 ```
+
+To try it once, run `npx @agent-custody/receipts init claude-code`. Do not keep the npx form: npm can clear its cache, and the hooks then stop working.
 
 Work in Claude Code as usual. Nothing is blocked, and the receipts stay on your machine. Then read what the policy would have denied:
 
@@ -29,7 +32,7 @@ npm install @agent-custody/receipts && npx @agent-custody/receipts keygen --dir 
 ::: code-group
 
 ```json [Claude Code]
-// .claude/settings.json: one hook command records every tool call and can deny one before it runs
+// .claude/settings.json: one hook command records each shell command, file edit, and MCP tool call, and can deny one before it runs
 { "hooks": {
   "PreToolUse":  [{ "matcher": "Bash|Write|Edit|mcp__.*", "hooks": [{ "type": "command", "command": "agent-custody hook --config /abs/path/sdk.json" }] }],
   "PostToolUse": [{ "matcher": "Bash|Write|Edit|mcp__.*", "hooks": [{ "type": "command", "command": "agent-custody hook --config /abs/path/sdk.json" }] }]

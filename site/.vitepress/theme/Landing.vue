@@ -1,34 +1,22 @@
 <script setup lang="ts">
-// The product's front door, outside the docs theme. The page leads with one action: run the refund demo on your
-// own machine. It then shows one complete story (a refund the policy allows, one it denies, and the audit), and the
-// pieces behind it. The one decorated object in the hero is the receipt card. It is the gateway-denied conformance
-// vector, decoded at build time: every byte verifies against the published keys, and the identities are the
-// fixture's. Colours are tokens on .landing. Light and dark share the names, and Flow.vue and Demo.vue read the
-// --vp-c-* aliases. Every section uses the same 1200px container, so all left edges line up.
+// The product's front door, outside the docs theme. It speaks to one reader: an engineer who runs a coding agent, such
+// as Claude Code, against a repository or a system that touches production. The order is the command, what the user
+// sees (the report), the incident replay, how a reviewer checks the record, and the limits of the hook. Everything else
+// is on /advanced. The word "receipt" comes after the page shows what a receipt does. The terminal text below is
+// real output: the report is from tutorial 36, and the replay is from tutorial 38 (packages/receipts/examples). Colours
+// are tokens on .landing. Light and dark share the names. Every section uses the same 1200px container, so all left
+// edges line up.
 import { onBeforeUnmount, ref } from "vue";
 import { useData } from "vitepress";
-import vectors from "../../../packages/receipts/vectors/receipts.json";
-import Flow from "./Flow.vue";
-import Demo from "./Demo.vue";
 
 const { isDark } = useData();
-const sample = "gateway-denied";
-const bundle = (vectors.cases as any[]).find((c) => c.name === sample).bundle;
-const decode = (b64: string) => JSON.parse(typeof Buffer !== "undefined" ? Buffer.from(b64, "base64").toString("utf8") : atob(b64));
-const receipt = decode(bundle.envelope.payload).predicate;
-const head = decode(bundle.treeHead.payload);
-const short = (h: string) => h.slice(0, 12) + "…";
-const pounds = (pence: number) => "£" + (pence / 100).toLocaleString("en-GB", { minimumFractionDigits: 2 });
-const customer = receipt.facts.customer;
-const when = receipt.timestamp.replace("T", " ").slice(0, 19) + " UTC";
-const status: string = receipt.execution.status;
-const statusLabel = status.charAt(0).toUpperCase() + status.slice(1);
 const year = new Date().getUTCFullYear();
 
 const repo = "https://github.com/svayatta/agent-custody";
-const example = (file: string) => `${repo}/blob/main/packages/receipts/examples/${file}`;
-const verifyHref = `/verify?sample=${sample}`;
-const command = `git clone ${repo} && cd agent-custody && bun install && bun run demo`;
+const commands = ["npm install -g @agent-custody/receipts", "agent-custody init claude-code"];
+const command = commands.join("\n");
+const tryCommand = "npx @agent-custody/receipts init claude-code";
+const setupHref = "/guide/getting-started#claude-code-in-one-command";
 
 // The Copy button shows "Copied" for 1.5 seconds. The id says which of the two command boxes was used.
 // When the browser refuses the clipboard, the button says "Copy failed" and a note asks the visitor to select the text.
@@ -50,70 +38,49 @@ async function copy(id: string) {
 const label = (id: string) => (copied.value === id ? "Copied" : failed.value === id ? "Copy failed" : "Copy");
 onBeforeUnmount(() => clearTimeout(copyTimer));
 
-// The film. A chapter button seeks and plays. The timeupdate event marks the chapter that holds the playhead.
-const video = ref<HTMLVideoElement | null>(null);
-const chapters = [
-  { t: 0, at: "0:00", title: "The problem", line: "The only record of an agent's action is its own log." },
-  { t: 14, at: "0:14", title: "The gateway", line: "Between your agents and their tools, a signed receipt for every call." },
-  { t: 24, at: "0:24", title: "How it works", line: "A signed grant, a policy check before the tool runs, a Merkle log." },
-  { t: 40, at: "0:40", title: "The refund story", line: "£500 approved. Then a prompt injection asks for £5,000." },
-  { t: 72, at: "1:12", title: "The audit", line: "Months later, an auditor checks it with public keys and a copy of the log." },
-];
-const chapter = ref(0);
-function mark() {
-  const now = video.value?.currentTime ?? 0;
-  let on = 0;
-  chapters.forEach((c, i) => { if (now >= c.t) on = i; });
-  chapter.value = on;
-}
-function seek(i: number) {
-  const v = video.value;
-  if (!v) return;
-  v.currentTime = chapters[i].t;
-  chapter.value = i;
-  v.play().catch(() => {});
-}
+// The output of `report` after a session of four calls in observe mode (tutorial 36). The path of sdk.json is shortened.
+const reportCommand = "agent-custody report --config ~/.config/agent-custody/sdk.json";
+const report = `would have denied 2 calls (the policy recorded each one and blocked nothing)
+
+  Bash: git push --force origin main
+    reason:  force push rewrites shared history (git push --force-with-lease is allowed)
+    rule:    forbid(principal, action == Action::"Bash", resource) when { context.args has command && ( context.args.command like "*git push*--force *" || context.args.command like "*git push*--force" || context.args.command like "*git push -f*" || context.args.command like "*git push* -f" ) } [policy1]
+    receipt: 191e1095-db76-45fc-82d4-3dc9a6e14023  (2026-11-02T11:15:18.824Z)
+
+  Bash: terraform destroy -auto-approve
+    reason:  terraform destroy deletes infrastructure
+    rule:    forbid(principal, action == Action::"Bash", resource) when { context.args has command && context.args.command like "*terraform destroy*" } [policy5]
+    receipt: 6f4c2455-b578-4a0f-b7ed-7fee177e5a9b  (2026-11-02T11:15:18.827Z)
+
+Checked 4 receipts: 4 verified, 0 did not verify.
+
+To enforce this policy, remove the "mode": "observe" line from ~/.config/agent-custody/sdk.json. A denied call is then blocked before it runs.`;
+
+// The replay (tutorial 38): the text that Claude Code shows the agent, and the offline check.
+const denial = `agent-custody denied this call: terraform destroy deletes infrastructure (rule policy5, receipt 980d078f-2922-42b7-a5de-de3b99b00997)`;
+const verified = `6dd02745-62bd-46fa-9866-2e51adc0f682  VERIFIED (13 checks)  executed  decision allow  terraform plan
+980d078f-2922-42b7-a5de-de3b99b00997  VERIFIED (12 checks)  denied    decision deny  terraform destroy -auto-approve
+095d119e-5da7-4c74-bcc1-c91f0f2873c4  VERIFIED (12 checks)  denied    decision deny  rm -rf ~
+the same receipt checked against a key that is not the agent's does not verify
+receipt signature (issuer key): FAIL. RESULT: NOT VERIFIED`;
 
 const steps = [
-  { t: "Authorize", d: "A person signs a grant: which agent, which tools, for how long." },
-  { t: "Gate", d: "The gateway fetches the facts itself, evaluates the policy, and forwards or denies." },
-  { t: "Record", d: "One signed receipt per call: who authorized it, what was asked, what was checked, what happened." },
-  { t: "Log", d: "The receipt's hash goes to a Merkle log with signed heads. A rewrite is detectable by anyone who kept a checkpoint." },
-  { t: "Verify", d: "Anyone with the public keys checks a receipt, in the shell or the browser, offline." },
+  { t: "Run the command", d: "It makes a key, a starter deny list, and the Claude Code hooks for the current directory." },
+  { t: "Work as usual", d: "In observe mode the hook blocks nothing. It records each shell command, file edit, and MCP tool call." },
+  { t: "Read the report", d: "It lists each call that the policy would have denied." },
+  { t: "Enforce", d: "Remove one line from the config. A denied call then stops before it runs." },
 ];
-const rules = [
-  { t: "Limits", d: "A ceiling per call, in minor units. No floats, no rounding.", c: 'permit(principal, action == Action::"stripe.refund", resource)\nwhen { context.args.amount <= 100000 };' },
-  { t: "Facts, not claims", d: "The gateway looks the customer up itself before deciding. The agent's own arguments are never enough.", c: 'permit(principal, action == Action::"stripe.refund", resource)\nwhen { context.facts.customer.verified\n    && context.args.customer_id == context.facts.customer.id };' },
-  { t: "Allowed targets", d: "Only these accounts, these hosts, these paths. Anything else is refused before it leaves.", c: 'permit(principal, action == Action::"payout.send", resource)\nwhen { ["acct_treasury", "acct_payroll"].contains(context.args.to) };' },
-  { t: "Human approval", d: "A larger change needs a person the gateway can see approved it, in the system of record.", c: 'permit(principal, action == Action::"pr.merge", resource)\nwhen { context.facts.checks.all_green\n    && context.facts.reviews.human_count >= 1 };' },
-  { t: "Boundaries", d: "Where an agent may write, and what it must say when it does.", c: 'permit(principal, action == Action::"kb.write", resource)\nwhen { context.args.path like "notes/*"\n    && context.args has source };' },
-  { t: "Evidence before effect", d: "Name a tool as consequential and the authorization is logged before the call is forwarded. If the log refuses, nothing happens.", c: '"precommit": ["stripe.refund", "pr.merge", "deploy.promote"]' },
+const replay = [
+  { cmd: "terraform plan", tone: "allow", badge: "Runs", d: "The hook has no objection. The command runs, and the hook records it." },
+  { cmd: "terraform destroy -auto-approve", tone: "deny", badge: "Denied", d: "A rule of the deny list matches. The command does not run." },
+  { cmd: "rm -rf ~", tone: "deny", badge: "Denied", d: "A second rule matches. The command does not run." },
 ];
-// The short line under each tab title.
-const tabLine: Record<string, string> = {
-  "Limits": "A ceiling per call, in minor units",
-  "Facts, not claims": "The gateway looks the customer up",
-  "Allowed targets": "Only these accounts and hosts",
-  "Human approval": "A person the gateway can see",
-  "Boundaries": "Where an agent may write",
-  "Evidence before effect": "Logged before it is forwarded",
-};
-// The tabs follow the ARIA tabs pattern: one tab is in the tab order, and the arrow keys move between tabs.
-const rule = ref(0);
-const tabs = ref<HTMLButtonElement[]>([]);
-function pick(i: number) {
-  rule.value = i;
-  tabs.value[i]?.focus();
-}
-function tabKey(e: KeyboardEvent, i: number) {
-  const n = rules.length;
-  const next = { ArrowDown: (i + 1) % n, ArrowRight: (i + 1) % n, ArrowUp: (i + n - 1) % n, ArrowLeft: (i + n - 1) % n, Home: 0, End: n - 1 }[e.key];
-  if (next === undefined) return;
-  e.preventDefault();
-  pick(next);
-}
-// Splits Cedar code so the two keywords get their own colour.
-const keywords = (code: string) => code.split(/(\bpermit\b|\bwhen\b)/).map((s) => ({ s, k: s === "permit" || s === "when" }));
+const limits = [
+  { t: "A credential in the environment", d: "If the agent's shell holds a cloud key or a database password, a process that the agent starts can use it. The hook stops a call that the agent makes through its tools. It does not stop that process." },
+  { t: "The match is on text", d: "The starter list matches the text of a command. It catches the plain form of each command. It is not a sandbox." },
+  { t: "Some tools are not seen", d: "The hook matches shell commands, file edits, and MCP tools. It does not see Read, Grep, Glob, WebFetch, WebSearch, or Task. The starter deny list has rules for shell commands only." },
+  { t: "The record is the agent's own report", d: "The signature shows that the record did not change after the hook wrote it. It does not show that the hook saw every call." },
+];
 </script>
 
 <template>
@@ -125,7 +92,7 @@ const keywords = (code: string) => code.split(/(\bpermit\b|\bwhen\b)/).map((s) =
           <span>agent-custody</span>
         </a>
         <nav class="navlinks" aria-label="Site">
-          <a href="#film">Overview</a><a href="#story">The demo</a><a href="#how">How it works</a><a href="#policies">Policies</a><a href="/use-cases">Use cases</a><a href="/pricing">Pricing</a><a href="/guide/getting-started">Docs</a>
+          <a href="#report">What you see</a><a href="#replay">Incident replay</a><a href="#limits">Limits</a><a href="/advanced">Advanced</a><a href="/pricing">Pricing</a><a href="/guide/getting-started">Docs</a>
         </nav>
         <div class="right">
           <button class="icon-btn" type="button" aria-label="Switch between light and dark mode" @click="isDark = !isDark">
@@ -144,179 +111,102 @@ const keywords = (code: string) => code.split(/(\bpermit\b|\bwhen\b)/).map((s) =
       <section class="hero">
         <div class="wrap">
           <div>
-            <h1>Proof of what your AI agents did.</h1>
-            <p class="lede">A gateway between an agent and its tools. It checks every call against a grant a person signed and a policy, forwards or denies it, and issues a signed receipt either way. Anyone with the public keys can verify the receipt, offline.</p>
+            <h1>Stop your coding agent from running destructive commands, and keep a signed record that a reviewer can check.</h1>
+            <p class="lede">For engineers who run Claude Code against repositories and systems that touch production. One command adds a hook to Claude Code. The hook checks each shell command, file edit, and MCP tool call against a deny list before the call runs. The starter list covers force push, <code>rm -rf</code> on <code>/</code> and <code>~</code>, <code>terraform destroy</code>, and <code>drop database</code>.</p>
+            <div class="cmd"><div class="lines"><div v-for="c in commands" :key="c"><span class="prompt" aria-hidden="true">$</span><code>{{ c }}</code></div></div><button type="button" aria-live="polite" @click="copy('hero')">{{ label("hero") }}</button></div>
+            <p v-if="failed === 'hero'" class="note" role="status">Copy failed. Select the command and copy it by hand.</p>
+            <p class="note">Needs Node 22. It starts in observe mode: nothing is blocked until you say so.</p>
+            <p class="note">To try it once, run <code>{{ tryCommand }}</code>. Do not keep the npx form: npm can clear its cache, and the hooks then stop working.</p>
             <div class="ctas">
-              <a class="btn primary" href="#run">Run the refund demo locally</a>
-              <a class="btn" :href="verifyHref">Verify a receipt in your browser</a>
+              <a class="btn primary" href="/guide/incident-replay">See the incident replay</a>
+              <a class="btn" :href="setupHref">Setup for Claude Code</a>
             </div>
-            <div class="cmd"><span class="prompt" aria-hidden="true">$</span><code>{{ command }}</code><button type="button" aria-live="polite" @click="copy('hero')">{{ label("hero") }}</button></div>
-          <p v-if="failed === 'hero'" class="note" role="status">Copy failed. Select the command and copy it by hand.</p>
-            <p class="note">Requires Node 22 and Bun. Runs four calls through the gateway, three refunds and a payout, and verifies each receipt.</p>
-            <a class="watch" href="#film"><span class="play" aria-hidden="true">▶</span>Watch the overview (1:32)</a>
           </div>
 
-          <article class="receipt" :aria-label="`A receipt: a ${pounds(receipt.request.args.amount).replace('.00', '')} refund the policy refused`">
+          <article class="denied" aria-label="A Claude Code tool call that the deny list refused">
             <header>
-              <div><div class="t">Receipt · {{ receipt.tool.name }}</div><div class="d">{{ when }}</div></div>
-              <span class="badge" :class="receipt.policy.decision">{{ statusLabel }}</span>
+              <div><div class="t">Claude Code · Bash</div><div class="d">enforce mode</div></div>
+              <span class="badge deny">Denied</span>
             </header>
             <dl>
-              <dt>Asked for</dt><dd>refund {{ pounds(receipt.request.args.amount) }} to {{ receipt.request.args.customer_id }}</dd>
-              <dt>Gateway checked</dt><dd>customer {{ customer.value.id }}, verified {{ customer.value.verified }} <small>{{ customer.provenance }}</small></dd>
-              <dt>Policy</dt><dd>refunds to £1,000 for a verified customer <small>sha256 {{ short(receipt.policy.policyDigest) }}</small></dd>
-              <dt>Decision</dt><dd>{{ receipt.policy.decision }} · {{ receipt.execution.reason }}</dd>
-              <dt>Agent</dt><dd>{{ receipt.agent.id }} <small>{{ receipt.agent.provenance }}</small></dd>
-              <dt>Authorized by</dt><dd>{{ receipt.principal.id }} <small>a grant they signed</small></dd>
-              <dt>Log</dt><dd>leaf {{ bundle.inclusion.leafIndex + 1 }} of {{ head.treeSize }} · root {{ short(head.rootHash) }}</dd>
+              <dt>The agent ran</dt><dd>terraform destroy -auto-approve</dd>
+              <dt>Rule</dt><dd>terraform destroy deletes infrastructure</dd>
+              <dt>Result</dt><dd>denied before it ran</dd>
+              <dt>The agent was told</dt><dd>{{ denial }}</dd>
             </dl>
-            <footer><span>Checked with the published keys. Nothing is uploaded.</span><a :href="verifyHref">Verify this receipt →</a></footer>
+            <footer><span>From the incident replay. No command ran.</span><a href="/guide/incident-replay">Read the replay →</a></footer>
           </article>
         </div>
       </section>
 
-      <section class="integrations" aria-labelledby="integrations-h">
+      <section id="report" class="sec alt">
         <div class="wrap">
-          <div class="int-head"><h2 id="integrations-h">Integrations</h2><p>Also DeepSeek Harness, Hermes, CrewAI, and the Claude Agent SDK. <a href="/guide/getting-started">Setup for each →</a></p></div>
-          <div class="int-grid">
-            <a class="int" href="/guide/getting-started"><b>Claude Code</b><code>PreToolUse hook</code></a>
-            <a class="int" href="/guide/getting-started"><b>Any MCP host</b><code>gateway as MCP server</code></a>
-            <a class="int" href="/guide/getting-started"><b>OpenAI Agents SDK</b><code>wrapTools</code></a>
-            <a class="int" href="/guide/getting-started"><b>LangChain, LangGraph</b><code>issuer.wrap + callback</code></a>
-            <a class="int" href="/guide/getting-started"><b>Vercel AI SDK</b><code>wrapTools</code></a>
-            <a class="int" href="/guide/getting-started"><b>Google ADK</b><code>tool callbacks</code></a>
-            <a class="int" href="/guide/getting-started"><b>OpenClaw</b><code>before_tool_call hook</code></a>
-            <a class="int" href="/guide/getting-started"><b>Python, Go, Java, Rust</b><code>HTTP sidecar</code></a>
-          </div>
-        </div>
-      </section>
-
-      <section id="film" class="sec alt">
-        <div class="wrap">
-          <h2>Product overview</h2>
-          <p class="sub">Narrated, with captions.</p>
-          <div class="film">
-            <div class="screen">
-              <video ref="video" controls playsinline preload="none" poster="/promo-poster.jpg" width="1920" height="1080" aria-label="A 93-second narrated film: the problem, the gateway, and a refund agent caught by a prompt injection, then the audit." @timeupdate="mark" @seeked="mark">
-                <source src="/promo.mp4" type="video/mp4" />
-                <track kind="captions" src="/promo.vtt" srclang="en" label="English" />
-              </video>
-            </div>
-            <ol class="chapters" aria-label="Chapters">
-              <li v-for="(c, i) in chapters" :key="c.t" :class="{ on: chapter === i }">
-                <button type="button" :aria-current="chapter === i ? 'true' : undefined" @click="seek(i)">
-                  <span class="at">{{ c.at }}</span>
-                  <span class="what"><b>{{ c.title }}</b>{{ c.line }}</span>
-                </button>
-              </li>
-            </ol>
-          </div>
-        </div>
-      </section>
-
-      <section id="problem" class="sec">
-        <div class="wrap">
-          <h2>The problem</h2>
-          <p class="sub">An agent's only record is the log its own process wrote. Nobody outside the team can check it.</p>
-          <div class="cards c3">
-            <div class="card"><h3>Made-up authority</h3><p>The agent refunds £50,000. Its log says the customer asked. Nobody signed anything that allowed it.</p></div>
-            <div class="card"><h3>A log that can be edited</h3><p>The team that ran the agent holds the log. After the incident, the entry that matters is gone or different.</p></div>
-            <div class="card"><h3>Evidence nobody else can check</h3><p>Traces sit in a vendor account. The auditor gets a screenshot and a promise.</p></div>
-          </div>
-        </div>
-      </section>
-
-      <section id="story" class="sec alt">
-        <div class="wrap">
-          <h2>The refund demo</h2>
-          <p class="sub"><code>bun run demo</code> runs a support agent against a test Stripe server. Each call writes a signed receipt to your disk. Then the demo verifies the receipts and edits one.</p>
-          <Demo />
-        </div>
-      </section>
-
-      <section id="how" class="sec">
-        <div class="wrap">
-          <h2>How it works</h2>
-          <p class="sub">Every call goes through the same five steps.</p>
-          <div class="cards c5">
-            <div v-for="(s, i) in steps" :key="s.t" class="card"><span class="n">{{ String(i + 1).padStart(2, "0") }}</span><h3>{{ s.t }}</h3><p>{{ s.d }}</p></div>
-          </div>
-          <div class="flowbox"><Flow /></div>
-        </div>
-      </section>
-
-      <section id="policies" class="sec alt">
-        <div class="wrap">
-          <h2>Policies</h2>
-          <p class="sub">Written in Cedar and evaluated on facts the gateway fetches itself. Each receipt records the policy digest.</p>
-          <div class="policy">
-            <div class="tabs" role="tablist" aria-label="Policy rules">
-              <button v-for="(r, i) in rules" :id="`tab-${i}`" :key="r.t" :ref="(el) => { if (el) tabs[i] = el as HTMLButtonElement }" type="button" role="tab" class="tab" :class="{ on: rule === i }" :aria-selected="rule === i" aria-controls="rule-panel" :tabindex="rule === i ? 0 : -1" @click="rule = i" @keydown="tabKey($event, i)">
-                <b>{{ r.t }}</b><span>{{ tabLine[r.t] }}</span>
-              </button>
-            </div>
-            <div id="rule-panel" class="panel" role="tabpanel" :aria-labelledby="`tab-${rule}`" tabindex="0">
-              <pre><template v-for="(p, i) in keywords(rules[rule].c)" :key="i"><span v-if="p.k" class="kw">{{ p.s }}</span><template v-else>{{ p.s }}</template></template></pre>
-              <p>{{ rules[rule].d }}</p>
-            </div>
-          </div>
-          <p class="after">Nine more, each run by the test suite, are in <a href="/receipts/policies">Writing policies</a>.</p>
-        </div>
-      </section>
-
-      <section id="compare" class="sec">
-        <div class="wrap">
-          <h2>Receipts compared with logs and traces</h2>
-          <p class="sub">Receipts export to OpenTelemetry and Splunk, so you keep your current tools.</p>
+          <h2>What you see</h2>
+          <p class="sub">Work in Claude Code as usual. The hook signs a record of each shell command, file edit, and MCP tool call. The record is called a receipt. The report checks the signature of every receipt, and then it lists the calls that the deny list would have stopped.</p>
           <div class="two">
-            <div class="tablewrap">
-              <table>
-                <thead><tr><th scope="col"><span class="sr-only">Question</span></th><th scope="col">Application log</th><th scope="col">Trace</th><th scope="col">Gateway receipt</th></tr></thead>
-                <tbody>
-                  <tr><th scope="row">Written by</th><td>the agent's process</td><td>the agent's process</td><td class="yes">a gateway, with its own key</td></tr>
-                  <tr><th scope="row">Allowed or denied before the tool ran</th><td class="no">—<span class="sr-only">no</span></td><td class="no">—<span class="sr-only">no</span></td><td class="yes">yes, and a denial is a receipt</td></tr>
-                  <tr><th scope="row">Who authorized it</th><td class="no">—<span class="sr-only">not recorded</span></td><td class="no">—<span class="sr-only">not recorded</span></td><td class="yes">the grant a person signed</td></tr>
-                  <tr><th scope="row">A rewrite is detectable</th><td class="no">—<span class="sr-only">no</span></td><td class="no">—<span class="sr-only">no</span></td><td class="yes">yes, by anyone who kept a checkpoint</td></tr>
-                  <tr><th scope="row">Who can check it</th><td>log access holders</td><td>the tracing account</td><td class="yes">anyone with the public keys</td></tr>
-                </tbody>
-              </table>
+            <ol class="steps">
+              <li v-for="(s, i) in steps" :key="s.t"><span class="n">{{ String(i + 1).padStart(2, "0") }}</span><div><b>{{ s.t }}</b><p>{{ s.d }}</p></div></li>
+            </ol>
+            <div>
+              <div class="term" role="group" aria-label="The report">
+                <div class="termbar" tabindex="0" role="group" aria-label="The report command"><span class="prompt" aria-hidden="true">$</span><code>{{ reportCommand }}</code></div>
+                <pre tabindex="0" aria-label="The output of the report command">{{ report }}</pre>
+              </div>
+              <p class="caption">Output of <a :href="`${repo}/blob/main/packages/receipts/examples/36-claude-code-init.ts`">tutorial 36</a>, with the path of <code>sdk.json</code> shortened. The tutorial runs four calls: two match the list.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="replay" class="sec">
+        <div class="wrap">
+          <h2>An incident replay</h2>
+          <p class="sub">A coding agent runs <code>terraform destroy</code>. This is the moment that you want the hook for. A script plays the session in enforce mode. It needs no model and no network, and it runs no destructive command.</p>
+          <div class="cards c3">
+            <div v-for="r in replay" :key="r.cmd" class="card">
+              <span class="badge" :class="r.tone">{{ r.badge }}</span>
+              <h3><code>{{ r.cmd }}</code></h3>
+              <p>{{ r.d }}</p>
+            </div>
+          </div>
+          <div class="two replay-out">
+            <div>
+              <p class="h3">What Claude Code shows the agent</p>
+              <div class="term"><pre tabindex="0" aria-label="The text that Claude Code shows the agent">{{ denial }}</pre></div>
+              <p class="caption">The text says what the rule forbids. It names the rule, <code>policy5</code>, and the id of the signed record of the denial.</p>
             </div>
             <div>
-              <p class="h3">Measured on a laptop <small>(lower is better)</small></p>
-              <div class="stats">
-                <div class="stat"><b>0.10 ms</b><span>a policy decision</span></div>
-                <div class="stat"><b>0.52 ms</b><span>a full gateway call</span></div>
-                <div class="stat"><b>0.14 ms</b><span>verifying a receipt</span></div>
-                <div class="stat"><b>5.7 KB</b><span>a receipt; the log gets 32 bytes</span></div>
-              </div>
-              <p class="caption">Medians, Apple silicon, Node 22, from <a :href="`${repo}/blob/main/packages/receipts/scripts/bench.ts`">scripts/bench.ts</a>. You can run it.</p>
+              <p class="h3">What a reviewer checks, offline</p>
+              <div class="term"><pre tabindex="0" aria-label="The offline check of the receipts">{{ verified }}</pre></div>
+              <p class="caption">The reviewer holds the agent's public key and the receipt files. Nothing else. The last line is the <code>terraform destroy</code> receipt checked with a key that is not the agent's. <a href="/verify">Verify a receipt in your browser →</a></p>
             </div>
           </div>
-        </div>
-      </section>
-
-      <section id="use-cases" class="sec alt">
-        <div class="wrap">
-          <h2>Use cases</h2>
-          <p class="sub">Each one has a runnable example.</p>
-          <div class="cards c4">
-            <div class="card"><h3>Payments and refunds</h3><p>Refund within a limit, for a customer the gateway verified.</p><div class="links"><a href="#story">The demo above →</a><a :href="example('17-rest-upstream.ts')">Example 17: a REST upstream →</a></div></div>
-            <div class="card"><h3>Agents that write code</h3><p>Risk-tiered merges. Change-management evidence for SOC 2 and ISO 27001.</p><div class="links"><a href="/blog/risk-tiered-merges-with-evidence">Risk-tiered merges, with evidence →</a><a :href="example('24-agentic-cicd-merge-gate.ts')">Example 24: the merge gate →</a></div></div>
-            <div class="card"><h3>Knowledge bases</h3><p>Read anything, write only under notes/, with a source.</p><div class="links"><a href="/demo-langchain-kb.mp4">A 22-second film →</a><a :href="example('23-langchain-kb-agent.ts')">Example 23: LangChain →</a></div></div>
-            <div class="card"><h3>Your own repository</h3><p>Every Claude Code tool call as a receipt.</p><div class="links"><a href="/custody">This repository →</a><a href="/reference/claude-code">The hook →</a></div></div>
+          <div class="ctas after">
+            <a class="btn primary" href="/guide/incident-replay">Read the replay, with its full output →</a>
           </div>
         </div>
       </section>
 
-      <section id="run" class="sec final">
+      <section id="limits" class="sec alt">
         <div class="wrap">
-          <h2>Run the demo</h2>
-          <p class="sub">Requires Node 22 and Bun. No account needed.</p>
-          <div class="cmd"><span class="prompt" aria-hidden="true">$</span><code>{{ command }}</code><button type="button" aria-live="polite" @click="copy('final')">{{ label("final") }}</button></div>
+          <h2>What the hook does not stop</h2>
+          <p class="sub">The hook stops a shell command, a file edit, or an MCP tool call that the agent makes. Read these limits before you rely on it.</p>
+          <div class="cards c2">
+            <div v-for="l in limits" :key="l.t" class="card"><h3>{{ l.t }}</h3><p>{{ l.d }}</p></div>
+          </div>
+          <p class="after">To cover more, keep production credentials out of the agent's environment, and put a gateway between the agent and the tools that touch production. The gateway is on the <a href="/advanced">advanced page</a>. The <a href="/receipts/threat-model">threat model</a> lists what each part defends, and what it does not. No independent witness runs yet, and the hosted log is not anchored on mainnet yet.</p>
+        </div>
+      </section>
+
+      <section id="start" class="sec final">
+        <div class="wrap">
+          <h2>Try it on your own sessions</h2>
+          <p class="sub">Needs Node 22. No account. A global install keeps the hooks working.</p>
+          <div class="cmd"><div class="lines"><div v-for="c in commands" :key="c"><span class="prompt" aria-hidden="true">$</span><code>{{ c }}</code></div></div><button type="button" aria-live="polite" @click="copy('final')">{{ label("final") }}</button></div>
           <p v-if="failed === 'final'" class="note" role="status">Copy failed. Select the command and copy it by hand.</p>
           <div class="ctas">
-            <a class="btn primary" href="/guide/getting-started">Put the gateway in front of your agent →</a>
-            <a class="btn" :href="verifyHref">Verify a receipt in your browser</a>
+            <a class="btn primary" :href="setupHref">Setup for Claude Code →</a>
+            <a class="btn" href="/advanced">Advanced: the gateway, memory, and the hosted log</a>
           </div>
         </div>
       </section>
@@ -330,11 +220,11 @@ const keywords = (code: string) => code.split(/(\bpermit\b|\bwhen\b)/).map((s) =
               <svg viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="14" class="tile" /><path d="M19 11H45V45L41.75 48 38.5 45 35.25 48 32 45 28.75 48 25.5 45 22.25 48 19 45Z" fill="#fff" /><path d="M25 20h14M25 27h14" class="ink" stroke-width="2.6" stroke-linecap="round" /><path d="M25 37.5l5 4.5 9.5-10" fill="none" class="ink" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
               <span>agent-custody</span>
             </a>
-            <p>Signed, verifiable receipts for every tool call an AI agent makes.</p>
+            <p>A deny list and a signed record for coding agents.</p>
           </div>
-          <nav aria-label="Product"><h2>Product</h2><ul><li><a href="/use-cases">Use cases</a></li><li><a href="/pricing">Pricing</a></li><li><a href="/early-access">Hosted log</a></li><li><a href="/verify">Verify</a></li></ul></nav>
-          <nav aria-label="Docs"><h2>Docs</h2><ul><li><a href="/guide/getting-started">Getting started</a></li><li><a href="/reference/">Reference</a></li><li><a href="/receipt/v0.2">Receipt spec</a></li><li><a href="/changelog">Changelog</a></li></ul></nav>
-          <nav aria-label="Trust"><h2>Trust</h2><ul><li><a href="/security">Security</a></li><li><a href="/faq">FAQ: where data goes</a></li><li><a href="/receipts/threat-model">Threat model</a></li><li><a href="/custody">Under custody</a></li></ul></nav>
+          <nav aria-label="Product"><h2>Product</h2><ul><li><a href="/advanced">Advanced</a></li><li><a href="/use-cases">Use cases</a></li><li><a href="/pricing">Pricing</a></li><li><a href="/early-access">Hosted log</a></li><li><a href="/verify">Verify</a></li></ul></nav>
+          <nav aria-label="Docs"><h2>Docs</h2><ul><li><a href="/guide/getting-started">Getting started</a></li><li><a href="/guide/incident-replay">Incident replay</a></li><li><a href="/reference/">Reference</a></li><li><a href="/receipt/v0.2">Receipt spec</a></li><li><a href="/changelog">Changelog</a></li></ul></nav>
+          <nav aria-label="Trust"><h2>Trust</h2><ul><li><a href="/security">Security</a></li><li><a href="/faq">FAQ: where data goes</a></li><li><a href="/receipts/threat-model">Threat model</a></li><li><a href="/custody">This repository</a></li></ul></nav>
           <nav aria-label="Company"><h2>Company</h2><ul><li><a href="/blog/">Writing</a></li><li><a href="/contact">Contact</a></li><li><a href="/privacy">Privacy</a></li><li><a href="/terms">Terms</a></li></ul></nav>
         </div>
         <div class="legal">
@@ -392,7 +282,7 @@ html.dark .icon-btn svg.moon { display: none; }
 /* Section rhythm */
 .sec { padding: 96px 0; border-top: 1px solid var(--line); scroll-margin-top: 64px; }
 .alt { background: var(--bg-2); }
-h1 { font-size: clamp(34px, 6vw, 56px); line-height: 1.06; letter-spacing: -.035em; font-weight: 700; margin: 0 0 20px; }
+h1 { font-size: clamp(28px, 4.4vw, 44px); line-height: 1.12; letter-spacing: -.03em; font-weight: 700; margin: 0 0 20px; }
 h2 { font-size: clamp(28px, 4vw, 36px); line-height: 1.15; letter-spacing: -.025em; font-weight: 650; margin: 0 0 16px; max-width: 22ch; border: 0; padding: 0; }
 .sub { font-size: 18px; color: var(--ink-2); max-width: 60ch; margin: 0 0 48px; }
 .sub code { font-size: .9em; color: var(--ink); }
@@ -402,10 +292,13 @@ h2 { font-size: clamp(28px, 4vw, 36px); line-height: 1.15; letter-spacing: -.025
 .hero .wrap { display: grid; grid-template-columns: 1.1fr .9fr; gap: 64px; align-items: center; }
 .hero .wrap > * { min-width: 0; }
 .lede { font-size: 19px; color: var(--ink-2); margin: 0 0 32px; max-width: 34em; }
+.hero .ctas { margin-top: 24px; }
 .ctas { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 20px; }
 .cmd { display: flex; align-items: center; gap: 12px; background: var(--term); color: var(--term-ink); border-radius: 10px; padding: 12px 12px 12px 16px; font: 13.5px var(--mono); max-width: 560px; }
 .cmd .prompt { color: #a8a29e; flex: none; }
-.cmd code { flex: 1; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; user-select: all; }
+.cmd .lines { flex: 1; min-width: 0; display: grid; gap: 4px; user-select: all; }
+.cmd .lines > div { display: flex; gap: 12px; min-width: 0; }
+.cmd code { flex: 1; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .cmd button { flex: none; min-width: 64px; font: 12px var(--sans); background: #292524; color: var(--term-ink); border: 1px solid #44403c; border-radius: 6px; padding: 6px 10px; cursor: pointer; }
 .cmd button:hover { background: #44403c; }
 .note { font-size: 13px; color: var(--ink-2); margin: 10px 0 0; }
@@ -413,90 +306,52 @@ h2 { font-size: clamp(28px, 4vw, 36px); line-height: 1.15; letter-spacing: -.025
 .watch:hover { color: var(--ink); }
 .play { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; border: 1px solid var(--line-2); font-size: 10px; color: var(--brand); padding-left: 2px; }
 
-/* Receipt card */
-.receipt { border: 1px solid var(--line); border-radius: var(--r); background: var(--bg); box-shadow: 0 1px 2px rgba(0, 0, 0, .04), 0 24px 48px -24px rgba(28, 25, 23, .18); overflow: hidden; }
-.receipt header { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 16px 20px; border-bottom: 1px solid var(--line); }
-.receipt .t { font-weight: 600; font-size: 14px; } .receipt .d { font: 12px var(--mono); color: var(--ink-2); }
+/* The denied-call card in the hero */
+.denied { border: 1px solid var(--line); border-radius: var(--r); background: var(--bg); box-shadow: 0 1px 2px rgba(0, 0, 0, .04), 0 24px 48px -24px rgba(28, 25, 23, .18); overflow: hidden; }
+.denied header { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 16px 20px; border-bottom: 1px solid var(--line); }
+.denied .t { font-weight: 600; font-size: 14px; } .denied .d { font: 12px var(--mono); color: var(--ink-2); }
 .badge { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; border-radius: 999px; padding: 3px 10px; white-space: nowrap; }
 .badge::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .badge.deny { background: var(--deny-soft); color: var(--deny); } .badge.allow { background: var(--allow-soft); color: var(--allow); }
-.receipt dl { margin: 0; padding: 8px 20px; display: grid; grid-template-columns: 128px 1fr; font-size: 13.5px; }
-.receipt dt, .receipt dd { padding: 9px 0; border-bottom: 1px solid var(--line); margin: 0; }
-.receipt dl > :nth-last-child(-n+2) { border-bottom: 0; }
-.receipt dt { color: var(--ink-2); } .receipt dd { font-family: var(--mono); font-size: 12.5px; overflow-wrap: anywhere; }
-.receipt dd small { color: var(--ink-2); font-family: var(--sans); font-size: 12px; }
-.receipt footer { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 14px 20px; background: var(--bg-2); border-top: 1px solid var(--line); font-size: 13px; color: var(--ink-2); }
-.receipt footer a { flex: none; white-space: nowrap; font-weight: 600; color: var(--brand); text-decoration: none; }
-.receipt footer a:hover { color: var(--brand-hover); }
-
-/* Integrations. The grid background shows through a 1px gap, so every inner line is one line at each column count. */
-.integrations { padding: 48px 0 56px; border-top: 1px solid var(--line); }
-.int-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px 24px; margin-bottom: 20px; }
-.int-head h2 { margin: 0; font-size: 15px; line-height: 1.6; letter-spacing: 0; font-weight: 600; max-width: none; }
-.int-head p { margin: 0; font-size: 14px; color: var(--ink-2); }
-.int-head a { color: var(--brand); font-weight: 500; text-decoration: none; } .int-head a:hover { color: var(--brand-hover); }
-.int-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; background: var(--line); }
-.int { display: flex; flex-direction: column; gap: 6px; padding: 18px 20px; min-width: 0; text-decoration: none; background: var(--bg); }
-.int b { font-size: 15px; font-weight: 600; }
-.int code { font-size: 12.5px; color: var(--ink-2); overflow-wrap: anywhere; }
-.int:hover { background: var(--bg-2); } .int:hover b { color: var(--brand); }
+.denied dl { margin: 0; padding: 8px 20px; display: grid; grid-template-columns: 128px 1fr; font-size: 13.5px; }
+.denied dt, .denied dd { padding: 9px 0; border-bottom: 1px solid var(--line); margin: 0; }
+.denied dl > :nth-last-child(-n+2) { border-bottom: 0; }
+.denied dt { color: var(--ink-2); } .denied dd { font-family: var(--mono); font-size: 12.5px; overflow-wrap: anywhere; }
+.denied dd small { color: var(--ink-2); font-family: var(--sans); font-size: 12px; }
+.denied footer { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 14px 20px; background: var(--bg-2); border-top: 1px solid var(--line); font-size: 13px; color: var(--ink-2); }
+.denied footer a { flex: none; white-space: nowrap; font-weight: 600; color: var(--brand); text-decoration: none; }
+.denied footer a:hover { color: var(--brand-hover); }
 
 /* Cards */
 .cards { display: grid; gap: 20px; }
-.c3 { grid-template-columns: repeat(3, 1fr); } .c4 { grid-template-columns: repeat(4, 1fr); } .c5 { grid-template-columns: repeat(5, 1fr); }
+.c3 { grid-template-columns: repeat(3, 1fr); }
+.c2 { grid-template-columns: repeat(2, 1fr); }
 .card { border: 1px solid var(--line); border-radius: var(--r); padding: 24px; background: var(--bg); min-width: 0; }
 .card h3 { font-size: 16px; margin: 0 0 8px; font-weight: 600; } .card p { margin: 0; font-size: 14.5px; color: var(--ink-2); }
-.card .n { font: 12px var(--mono); color: var(--brand); margin-bottom: 14px; display: block; }
-.card .links { margin-top: 16px; display: flex; flex-direction: column; gap: 4px; font-size: 14px; white-space: normal; }
-.card .links a { color: var(--brand); text-decoration: none; font-weight: 500; } .card .links a:hover { color: var(--brand-hover); text-decoration: underline; }
+.card .badge { margin-bottom: 14px; }
+.card h3 code { font-size: 13.5px; overflow-wrap: anywhere; }
 
-/* Film */
-.film { display: grid; grid-template-columns: 1fr 340px; gap: 24px; align-items: stretch; }
-.screen { border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; background: #000; box-shadow: 0 24px 48px -28px rgba(28, 25, 23, .35); min-width: 0; }
-.screen video { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; }
-.chapters { list-style: none; margin: 0; padding: 8px; border: 1px solid var(--line); border-radius: var(--r); background: var(--bg); display: flex; flex-direction: column; }
-.chapters button { appearance: none; background: none; border: 0; font: inherit; color: inherit; text-align: left; width: 100%; display: grid; grid-template-columns: 44px 1fr; gap: 8px; padding: 12px; border-radius: 8px; cursor: pointer; }
-.chapters button:hover { background: var(--bg-2); }
-.chapters .at { font: 12.5px var(--mono); color: var(--ink-2); padding-top: 2px; }
-.chapters .what { font-size: 13.5px; color: var(--ink-2); line-height: 1.45; }
-.chapters b { display: block; font-size: 14.5px; color: var(--ink); font-weight: 600; margin-bottom: 2px; }
-.chapters .on button { background: var(--bg-2); box-shadow: inset 2px 0 0 var(--brand); }
-.chapters .on .at { color: var(--brand); }
-
-/* How */
-.flowbox { margin-top: 24px; border: 1px solid var(--line); border-radius: var(--r); padding: 32px; background: var(--bg); overflow-x: auto; }
-
-/* Policies */
-.policy { border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; background: var(--bg); }
-.tabs { display: flex; gap: 4px; padding: 8px 8px 0; border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: thin; }
-.tab { flex: none; appearance: none; background: none; border: 0; font: inherit; color: var(--ink-2); text-align: left; padding: 10px 14px 12px; border-radius: 8px 8px 0 0; cursor: pointer; }
-.tab b { display: block; font-size: 14.5px; font-weight: 600; } .tab span { display: none; }
-.tab:hover { background: var(--bg-2); color: var(--ink); }
-.tab.on { background: var(--bg-2); color: var(--ink); box-shadow: inset 0 -2px 0 var(--brand); }
-.panel { background: var(--bg-2); min-width: 0; }
-.panel pre { margin: 0; padding: 28px 28px 16px; font-size: 13.5px; line-height: 1.7; color: var(--ink); overflow-x: auto; white-space: pre; }
-.panel p { margin: 0; padding: 0 28px 28px; font-size: 14px; color: var(--ink-2); }
-.kw { color: var(--brand); }
-.after { margin: 20px 0 0; font-size: 14.5px; color: var(--ink-2); }
-.after a { color: var(--brand); font-weight: 500; }
-
-/* Compare and numbers */
-.two { display: grid; grid-template-columns: 1.4fr 1fr; gap: 48px; align-items: start; }
+/* Two columns, the steps, and the terminal blocks */
+.two { display: grid; grid-template-columns: 1fr 1.5fr; gap: 48px; align-items: start; }
 .two > * { min-width: 0; }
-.tablewrap { border: 1px solid var(--line); border-radius: var(--r); overflow-x: auto; background: var(--bg); }
-table { width: 100%; min-width: 36rem; border-collapse: collapse; font-size: 14px; }
-th, td { text-align: left; padding: 12px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
-tbody tr:last-child > * { border-bottom: 0; }
-thead th { background: var(--bg-2); font-size: 13px; color: var(--ink-2); font-weight: 600; }
-tbody th { font-weight: 500; } td { color: var(--ink-2); } td.yes { color: var(--ink); font-weight: 500; }
-td.no { color: var(--ink-3); }
-.h3 { font-size: 15px; font-weight: 600; margin: 0 0 14px; } .h3 small { font-weight: 400; color: var(--ink-2); }
-.stats { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-.stat { border: 1px solid var(--line); border-radius: var(--r); padding: 20px; background: var(--bg); min-width: 0; }
-.stat b { display: block; font-size: 32px; line-height: 1.25; font-weight: 650; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
-.stat span { font-size: 13.5px; color: var(--ink-2); }
+.replay-out { grid-template-columns: 1fr 1fr; margin-top: 32px; }
+.steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 24px; }
+.steps li { display: grid; grid-template-columns: 36px 1fr; gap: 8px; }
+.steps .n { font: 12px var(--mono); color: var(--brand); padding-top: 4px; }
+.steps b { display: block; font-size: 15.5px; font-weight: 600; margin-bottom: 2px; }
+.steps p { margin: 0; font-size: 14.5px; color: var(--ink-2); }
+.term { background: var(--term); color: var(--term-ink); border-radius: 10px; overflow: hidden; }
+.term pre { margin: 0; padding: 16px; font-size: 12.5px; line-height: 1.6; overflow-x: auto; white-space: pre; }
+.termbar { display: flex; gap: 12px; padding: 12px 16px; border-bottom: 1px solid #292524; font: 12.5px var(--mono); overflow-x: auto; white-space: nowrap; }
+.termbar .prompt { color: #a8a29e; flex: none; }
+.h3 { font-size: 15px; font-weight: 600; margin: 0 0 14px; }
 .caption { font-size: 13px; color: var(--ink-2); margin: 12px 0 0; }
-.caption a { color: var(--brand); }
+.caption a, .after a { color: var(--brand); font-weight: 500; }
+.caption code { font-size: .95em; }
+.after { margin: 24px 0 0; font-size: 15px; color: var(--ink-2); max-width: 70ch; }
+.ctas.after { margin-top: 32px; }
+.lede code { font-size: .88em; color: var(--ink); }
+.denied dd code { font-size: 12.5px; }
 
 /* Final call to action */
 .final { text-align: center; }
@@ -517,17 +372,15 @@ footer.site { border-top: 1px solid var(--line); padding: 56px 0 40px; font-size
 .legal a:hover { color: var(--ink); }
 
 @media (prefers-reduced-motion: no-preference) {
-  .btn, .icon-btn, .tab, .chapters button, .cmd button { transition: background-color .15s, border-color .15s, color .15s; }
+  .btn, .icon-btn, .cmd button { transition: background-color .15s, border-color .15s, color .15s; }
 }
 
 @media (max-width: 64rem) {
   .hero .wrap { grid-template-columns: 1fr; gap: 48px; }
-  .receipt { max-width: 560px; }
-  .film { grid-template-columns: 1fr; }
-  .int-grid { grid-template-columns: repeat(2, 1fr); }
-  .c3, .c4, .c5 { grid-template-columns: repeat(2, 1fr); }
-  .c3 > :last-child:nth-child(odd), .c5 > :last-child:nth-child(odd) { grid-column: 1 / -1; }
-  .two { grid-template-columns: 1fr; gap: 40px; }
+  .denied { max-width: 560px; }
+  .c3 { grid-template-columns: repeat(2, 1fr); }
+  .c3 > :last-child:nth-child(odd) { grid-column: 1 / -1; }
+  .two, .replay-out { grid-template-columns: 1fr; gap: 40px; }
   .cols { grid-template-columns: repeat(2, 1fr); } .about { grid-column: 1 / -1; }
   /* The nav needs two rows below this width: the links move under the logo and scroll sideways. */
   .nav .wrap { flex-wrap: wrap; height: auto; gap: 8px 16px; padding-top: 10px; padding-bottom: 10px; }
@@ -538,22 +391,17 @@ footer.site { border-top: 1px solid var(--line); padding: 56px 0 40px; font-size
 }
 @media (max-width: 48rem) {
   .sec { padding: 64px 0; }
-  .int-head { flex-direction: column; }
   .hero { padding: 48px 0 40px; }
   .sub { font-size: 17px; margin-bottom: 32px; }
-  .panel pre { padding: 20px 20px 12px; font-size: 13px; }
-  .panel p { padding: 0 20px 20px; }
-  .flowbox { padding: 16px; }
 }
 @media (max-width: 40rem) {
   .wrap { padding: 0 24px; }
-  .c3, .c4, .c5, .int-grid { grid-template-columns: 1fr; }
-  .receipt dl { grid-template-columns: 1fr; }
-  .receipt dt { padding-bottom: 0; border-bottom: 0; } .receipt dd { padding-top: 2px; }
-  .receipt dl > :nth-last-child(2) { border-bottom: 0; }
-  .receipt footer { flex-wrap: wrap; gap: 8px 16px; }
-  .stat b { font-size: 26px; }
-  .stat { padding: 16px; }
+  .c3, .c2 { grid-template-columns: 1fr; }
+  .ctas .btn { height: auto; min-height: 44px; padding-top: 8px; padding-bottom: 8px; white-space: normal; max-width: 100%; }
+  .denied dl { grid-template-columns: 1fr; }
+  .denied dt { padding-bottom: 0; border-bottom: 0; } .denied dd { padding-top: 2px; }
+  .denied dl > :nth-last-child(2) { border-bottom: 0; }
+  .denied footer { flex-wrap: wrap; gap: 8px 16px; }
   .legal { flex-direction: column; }
 }
 </style>
@@ -569,6 +417,5 @@ html.dark .landing {
   --term: #0c0a09; --term-ink: #e7e5e4;
 }
 html.dark .landing .cmd { border: 1px solid var(--line); }
-html.dark .landing .screen { box-shadow: none; }
-html.dark .landing .receipt { box-shadow: none; }
+html.dark .landing .denied { box-shadow: none; }
 </style>

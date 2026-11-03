@@ -2,23 +2,78 @@
 
 [![test](https://github.com/svayatta/agent-custody/actions/workflows/test.yml/badge.svg)](https://github.com/svayatta/agent-custody/actions/workflows/test.yml) [![site](https://github.com/svayatta/agent-custody/actions/workflows/site.yml/badge.svg)](https://github.com/svayatta/agent-custody/actions/workflows/site.yml) [![hosted log](https://github.com/svayatta/agent-custody/actions/workflows/monitor.yml/badge.svg)](https://github.com/svayatta/agent-custody/actions/workflows/monitor.yml) [![npm](https://img.shields.io/npm/v/%40agent-custody%2Freceipts?label=%40agent-custody%2Freceipts)](https://www.npmjs.com/package/@agent-custody/receipts) [![PyPI](https://img.shields.io/pypi/v/agent-custody?label=agent-custody)](https://pypi.org/project/agent-custody/)
 
-Proof of what your AI agents did. Every tool call an agent makes through the gateway becomes a signed record of who authorized it, what the agent saw, what it did, and what depended on it, checkable by anyone with the public keys. What each check proves, and against whom, is [a table](packages/receipts/README.md#what-a-receipt-proves-and-what-it-does-not), not a slogan.
+**Stop your coding agent from running destructive commands, and keep a signed record that a reviewer can check.**
 
-It is a chain of custody for both what an agent does and what it believes: authorize, execute, record, verify, trace, remediate. The agent is not trusted. The layer around it is, and every record says exactly how far that trust extends.
+This is for engineers who run Claude Code against repositories and systems that touch production. One command adds a hook to Claude Code. The hook checks each shell command, file edit, and MCP tool call against a deny list before the call runs. The starter list covers force push, `rm -rf` on `/` and `~`, `terraform destroy`, and `drop database`.
 
-## Packages
+```bash
+npm install -g @agent-custody/receipts
+agent-custody init claude-code
+```
 
-| package | what it is | status |
-| --- | --- | --- |
-| [`@agent-custody/receipts`](packages/receipts/README.md) | Signed receipts for tool calls: an MCP gateway with Cedar policy and a Merkle transparency log, an in-process SDK with framework adapters, and an offline verifier | working, with runnable tutorials |
-| [`agent-custody` on PyPI](packages/python/README.md) | The Python client of the sidecar: `decide`, `record`, `wrap`, and adapters for LangChain, the OpenAI Agents SDK, the Claude Agent SDK, CrewAI, Google ADK, and a Hermes Agent plugin, tested against the real packages | working; Go, Java, and Rust clients live in [examples/languages](packages/receipts/examples/languages) |
-| [`@agent-custody/state`](packages/state/README.md) | Governed memory: a fact ledger where every write cites the receipt that caused it, carries valid time and transaction time, and can be superseded or rolled back | ledger on JSONL or SQLite, memory server behind the gateway or shared over HTTP, quarantine and verified provenance, blast radius, certified forget, retention and legal holds, write-through to Mem0 and Zep, eval CLI with signed reports |
+The command needs Node 22. To try it once, run `npx @agent-custody/receipts init claude-code`. Do not keep the npx form: npm can clear its cache, and the hooks then stop working. The command makes an agent key, writes a starter deny list, and registers the hooks in `.claude/settings.local.json` of the current directory. It starts in observe mode: it blocks nothing until you say so. Details and options: [Setup for Claude Code](site/guide/getting-started.md#claude-code-in-one-command).
 
-Receipts are the unit. State is the ledger of what the agent came to believe from them. Both append to the same kind of signed log and are checked by the same kind of verifier.
+## What you see
 
-Try the [live Codex recovery demo](packages/receipts/docs/codex-recovery.md): a real agent handles a support request using incorrect customer memory, then an operator traces possible consequences, approves corrections and simulated credit compensation, and verifies the evidence.
+Work in Claude Code as usual. The hook signs a record of each shell command, file edit, and MCP tool call. The record is called a receipt. Then run the report. It checks the signature of every receipt, and it lists the calls that the deny list would have stopped.
 
-## What each piece is for, and when you need it
+```bash
+agent-custody report --config ~/.config/agent-custody/sdk.json
+```
+
+```text
+would have denied 2 calls (the policy recorded each one and blocked nothing)
+
+  Bash: git push --force origin main
+    reason:  force push rewrites shared history (git push --force-with-lease is allowed)
+    rule:    forbid(principal, action == Action::"Bash", resource) when { context.args has command && ( context.args.command like "*git push*--force *" || context.args.command like "*git push*--force" || context.args.command like "*git push -f*" || context.args.command like "*git push* -f" ) } [policy1]
+    receipt: 191e1095-db76-45fc-82d4-3dc9a6e14023  (2026-11-02T11:15:18.824Z)
+
+  Bash: terraform destroy -auto-approve
+    reason:  terraform destroy deletes infrastructure
+    rule:    forbid(principal, action == Action::"Bash", resource) when { context.args has command && context.args.command like "*terraform destroy*" } [policy5]
+    receipt: 6f4c2455-b578-4a0f-b7ed-7fee177e5a9b  (2026-11-02T11:15:18.827Z)
+
+Checked 4 receipts: 4 verified, 0 did not verify.
+
+To enforce this policy, remove the "mode": "observe" line from ~/.config/agent-custody/sdk.json. A denied call is then blocked before it runs.
+```
+
+That output comes from [tutorial 36](packages/receipts/examples/36-claude-code-init.ts), with the path of `sdk.json` shortened. To enforce the list, remove the `"mode": "observe"` line. A denied call then stops before it runs.
+
+## An incident replay
+
+A coding agent runs `terraform destroy`. A script plays the session in enforce mode. It needs no model and no network, and it runs no destructive command.
+
+```bash
+git clone https://github.com/svayatta/agent-custody
+cd agent-custody && bun install
+cd packages/receipts && node examples/38-incident-replay.ts
+```
+
+- `terraform plan` runs. The hook records an executed receipt.
+- `terraform destroy -auto-approve` is denied before it runs. Claude Code shows the agent `agent-custody denied this call: terraform destroy deletes infrastructure (rule policy5, receipt 980d078f-2922-42b7-a5de-de3b99b00997)`.
+- `rm -rf ~` is denied the same way.
+- A reviewer holds the agent's public key and the receipt files. They verify the three receipts offline. The same check with a key that is not the agent's fails for the `terraform destroy` receipt.
+
+The full output is on the page [An incident replay](site/guide/incident-replay.md).
+
+## What the hook does not stop
+
+The hook stops a shell command, a file edit, or an MCP tool call that the agent makes. Read these limits before you rely on it.
+
+- **A credential in the agent's environment goes around the hook.** If the shell of the agent holds a cloud key or a database password, a process that the agent starts can use it. The hook does not stop that process.
+- **The starter list matches the text of a command.** It catches the plain form of each command. It is not a sandbox.
+- **Some tools are not seen.** The hook matches `Bash`, `Write`, `Edit`, `MultiEdit`, `NotebookEdit`, and MCP tools. It does not see `Read`, `Grep`, `Glob`, `WebFetch`, `WebSearch`, or `Task`. The starter deny list has rules for `Bash` only.
+- **The record is the agent's own report.** Every field is `claimed`. The signature shows that the record did not change after the hook wrote it. It does not show that the hook saw every call.
+
+To cover more, keep production credentials out of the agent's environment, and put a gateway between the agent and the tools that touch production. The [threat model](packages/receipts/docs/threat-model.md) lists what each part defends, and what it does not. No independent witness runs yet, and the hosted log is not anchored on mainnet yet.
+
+## Advanced
+
+Everything above is the Claude Code hook. The rest of the product is below and on the [advanced page](site/advanced.md): the gateway with grants and Cedar policy, the transparency log, the state package for agent memory, the hosted log, and the other frameworks and languages.
+
+### What each piece is for, and when you need it
 
 <!-- #region pieces -->
 Each part exists because a specific thing goes wrong without it. Use the table to decide what to turn on.
@@ -43,7 +98,7 @@ Each part exists because a specific thing goes wrong without it. Use the table t
 The rule of thumb: record everything with the SDK, enforce the consequential calls with the gateway, log remotely once a receipt has an audience outside the team, put beliefs in the ledger the moment memory outlives a session, and turn on quarantine, forget, and holds the moment that memory holds anything about a person.
 <!-- #endregion pieces -->
 
-## Getting started
+### The SDK and the state ledger, step by step
 
 <!-- #region getting-started -->
 
@@ -131,9 +186,21 @@ This whole loop is one runnable file, [packages/state/examples/02-receipt-to-bel
 - Agents in Python, Go, Java, Rust, or anything else: the gateway is an MCP server and needs nothing from your language; for in-process receipts run the sidecar and use the Python package or a forty-line client. [sdk.md](packages/receipts/docs/sdk.md#other-languages-the-sidecar)
 - Step-by-step examples in the receipts package and more in the state package: [receipts tutorials](packages/receipts/docs/tutorials.md), [state examples](packages/state/examples).
 
+## Packages
+
+| package | what it is | status |
+| --- | --- | --- |
+| [`@agent-custody/receipts`](packages/receipts/README.md) | Signed receipts for tool calls: an MCP gateway with Cedar policy and a Merkle transparency log, an in-process SDK with framework adapters, and an offline verifier | working, with runnable tutorials |
+| [`agent-custody` on PyPI](packages/python/README.md) | The Python client of the sidecar: `decide`, `record`, `wrap`, and adapters for LangChain, the OpenAI Agents SDK, the Claude Agent SDK, CrewAI, Google ADK, and a Hermes Agent plugin, tested against the real packages | working; Go, Java, and Rust clients live in [examples/languages](packages/receipts/examples/languages) |
+| [`@agent-custody/state`](packages/state/README.md) | Governed memory: a fact ledger where every write cites the receipt that caused it, carries valid time and transaction time, and can be superseded or rolled back | ledger on JSONL or SQLite, memory server behind the gateway or shared over HTTP, quarantine and verified provenance, blast radius, certified forget, retention and legal holds, write-through to Mem0 and Zep, eval CLI with signed reports |
+
+Receipts are the unit. State is the ledger of what the agent came to believe from them. Both append to the same kind of signed log and are checked by the same kind of verifier.
+
+Try the [live Codex recovery demo](packages/receipts/docs/codex-recovery.md): a real agent handles a support request using incorrect customer memory, then an operator traces possible consequences, approves corrections and simulated credit compensation, and verifies the evidence.
+
 ## Agent sessions in this repository
 
-A Claude Code session in this repository can run under custody. On a machine with the recording config, each tool call becomes a signed receipt, and its hash goes to our tenant on the hosted log within seconds. A force push is refused by policy, and the refusal is a receipt too. A machine without that config records and refuses nothing, so the tenant does not cover all the work in this repository. The hook is committed in `.claude/`, the receipts and keys stay outside the repository, and [agent-custody.dev/custody](https://agent-custody.dev/custody) shows the live tenant and sample receipts anyone can verify.
+A Claude Code session in this repository can run under custody. On a machine with the recording config, each shell command, file edit, and MCP tool call becomes a signed receipt, and its hash goes to our tenant on the hosted log within seconds. A force push is refused by policy, and the refusal is a receipt too. A machine without that config records and refuses nothing, so the tenant does not cover all the work in this repository. The hook is committed in `.claude/`, the receipts and keys stay outside the repository, and [agent-custody.dev/custody](https://agent-custody.dev/custody) shows the live tenant and sample receipts anyone can verify.
 
 ## Security
 

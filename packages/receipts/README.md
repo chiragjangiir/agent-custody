@@ -56,7 +56,7 @@ const bundle = JSON.parse(readFileSync("receipts/<id>.json", "utf8"));
 verifyBundle(bundle, { issuerKeys: [loadPublicKey("keys/app.pub")], logFile: "log.jsonl" }).ok;   // true
 ```
 
-For your own Claude Code sessions, one command does the whole setup (key, config in observe mode, starter deny policy, hooks), and `agent-custody report` lists the calls the policy would have denied: `npx @agent-custody/receipts init claude-code`, then see [docs/sdk.md](docs/sdk.md#claude-code).
+For your own Claude Code sessions, one command does the whole setup (key, config in observe mode, starter deny policy, hooks), and `agent-custody report` lists the calls the policy would have denied: `npm install -g @agent-custody/receipts`, then `agent-custody init claude-code`, then see [docs/sdk.md](docs/sdk.md#claude-code).
 
 Framework hooks and adapters, including Claude Code, the OpenAI Agents SDK, the Vercel AI SDK, LangChain, OpenClaw, DeepSeek Harness, Hermes and Google ADK, are in [docs/sdk.md](docs/sdk.md). To enforce rather than record, put the gateway between the agent and its tools: `npx @agent-custody/receipts gateway --config gateway.json`, set up in [docs/usage.md](docs/usage.md); between an agent and the agents it delegates to over A2A, `--a2a` serves the gateway as an A2A agent itself. The gateway is listed in the [MCP Registry](https://registry.modelcontextprotocol.io/) as `io.github.svayatta/agent-custody`; its entry is [server.json](server.json), published after each npm release by running the `mcp-registry` workflow from the Actions tab (GitHub OIDC, no token).
 

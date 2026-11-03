@@ -103,7 +103,7 @@ No runnable example yet; the knowledge-base agent in [example 23](https://github
 
 ## Coding agents on your own repository
 
-**The call.** Every shell command, file write, and tool call a Claude Code session makes. See [agent sessions in this repository](/custody).
+**The call.** Every shell command, file edit, and MCP tool call a Claude Code session makes. See [agent sessions in this repository](/custody).
 
 ## What every case has in common
 
