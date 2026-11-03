@@ -107,7 +107,7 @@ export function formatDenyReport(r: DenyReport): string {
     for (const c of calls) {
       lines.push("", `  ${c.tool}: ${clip(c.target)}`);
       if (c.reasons.length) lines.push(`    reason:  ${c.reasons.join("; ")}`);
-      lines.push(`    rule:    ${c.rules.length ? c.rules.join(" | ") : c.policyIds.join(", ") || "(none)"}${c.rules.length ? ` [${c.policyIds.join(", ")}]` : ""}`);
+      lines.push(`    rule:    ${c.rules.length ? clip(c.rules.join(" | ")) : c.policyIds.join(", ") || "(none)"}${c.rules.length ? ` [${c.policyIds.join(", ")}]` : ""}`);
       lines.push(`    receipt: ${c.receiptId}  (${c.timestamp})`);
     }
   };

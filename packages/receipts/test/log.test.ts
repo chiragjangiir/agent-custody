@@ -103,7 +103,7 @@ describe("Merkle log shared by several processes", () => {
     log.append("x");
     expect(existsSync(`${file}.lock`)).toBe(false);
     writeFileSync(`${file}.lock`, "99999\n");
-    const old = new Date(Date.now() - 60_000);
+    const old = new Date(Date.now() - 120_000);
     utimesSync(`${file}.lock`, old, old);
     expect(log.append("y").leafIndex).toBe(1);
     expect(existsSync(`${file}.lock`)).toBe(false);

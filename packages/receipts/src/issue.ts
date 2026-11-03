@@ -1,13 +1,11 @@
 // Signing, logging and writing a receipt. Shared by every producer: the gateway and the SDK.
-import { randomUUID } from "node:crypto";
-import { chmodSync, closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
-import { hostname } from "node:os";
+import { chmodSync, closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { RECEIPT_ID, SALTS_DIR, saltsFileFor } from "./retention.ts";
 import { dirname, join } from "node:path";
 import { effectiveRule, getAt, privateView, type CaptureConfig, type CaptureContext, type PrivateView } from "./capture.ts";
 import { canonicalize, dsseSign, dsseVerify, type Envelope, type KeyPair } from "./crypto.ts";
 import { fileLog, type LogSink } from "./log-sink.ts";
-import { ownerAlive, processStamp } from "./operations.ts";
+import { takeLock } from "./lock.ts";
 import type { ReceiptExporter } from "./otel.ts";
 import { buildAuthorizationStatement, buildStatement, RECEIPT_TYPE, type AuthorizationBundle, type AuthorizationPredicate, type ReceiptBundle, type ReceiptPredicate } from "./receipt.ts";
 
@@ -130,51 +128,8 @@ export function createIssuer(key: KeyPair, receiptsDir: string, log: string | Lo
     }
   };
   const lockFile = join(outboxDir, ".lock");
-  /** Takes the outbox lock with an exclusive create. A lock whose owner is gone, or that no one has touched for a long time, is broken. Returns its release, or undefined when another flusher holds it. */
-  const takeLock = (): (() => void) | undefined => {
-    const token = randomUUID();
-    const body = JSON.stringify({ token, pid: process.pid, start: processStamp(process.pid), host: hostname() });
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        const fd = openSync(lockFile, "wx", 0o600);
-        try {
-          writeFileSync(fd, body);
-        } finally {
-          closeSync(fd);
-        }
-        return () => {
-          try {
-            if ((JSON.parse(readFileSync(lockFile, "utf8")) as { token: string }).token === token) rmSync(lockFile, { force: true });
-          } catch { /* already broken by another flusher */ }
-        };
-      } catch (e) {
-        if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
-      }
-      if (!lockIsStale()) return undefined;
-      // two flushers may both judge it stale; the rename lets one of them move it, the other gets ENOENT and tries again
-      try {
-        const gone = `${lockFile}.stale-${randomUUID()}`;
-        renameSync(lockFile, gone);
-        rmSync(gone, { force: true });
-      } catch (e) {
-        if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
-      }
-    }
-    return undefined;
-  };
-  const lockIsStale = (): boolean => {
-    try {
-      const age = Date.now() - statSync(lockFile).mtimeMs;
-      let owner: { pid: number; start?: string; host: string } | undefined;
-      try { owner = JSON.parse(readFileSync(lockFile, "utf8")); } catch { /* a lock being written */ }
-      if (!owner) return age > 60_000;
-      if (owner.host === hostname() && !ownerAlive({ ownerPid: owner.pid, ...(owner.start ? { ownerStart: owner.start } : {}) })) return true;
-      return age > LOCK_STALE_MS;
-    } catch (e) {
-      if ((e as NodeJS.ErrnoException).code === "ENOENT") return true;
-      throw e;
-    }
-  };
+  /** Undefined when another flusher holds the lock. A lock whose owner is gone, or that no one has touched for a long time, is broken. */
+  const takeOutboxLock = () => takeLock(lockFile, LOCK_STALE_MS);
   const writeBundle = async (receiptId: string, v: ReceiptPredicate, bundle: ReceiptBundle) => {
     const file = join(receiptsDir, `${receiptId}.json`);
     // whole or absent: a flush takes a bundle that is there as proof that the outbox entry is done
@@ -266,7 +221,7 @@ export function createIssuer(key: KeyPair, receiptsDir: string, log: string | Lo
       flushing ??= (async (): Promise<FlushResult> => {
         const idle = (): FlushResult => ({ sent: 0, pending: outboxed().length, setAside: 0, foreign: 0 });
         if (!outboxed().length) return idle();
-        const release = takeLock();
+        const release = takeOutboxLock();
         if (!release) return idle();
         try {
           let sent = 0;

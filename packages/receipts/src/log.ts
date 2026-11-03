@@ -1,8 +1,9 @@
 // Append-only Merkle log with RFC 6962 / RFC 9162 hashing and inclusion proofs.
 // Leaves are stored as JSONL so anyone holding the file can recompute the root.
 import { createHash } from "node:crypto";
-import { appendFileSync, closeSync, mkdirSync, openSync, readSync, statSync, unlinkSync } from "node:fs";
+import { appendFileSync, closeSync, mkdirSync, openSync, readSync, statSync, truncateSync } from "node:fs";
 import { dirname } from "node:path";
+import { withLock } from "./lock.ts";
 
 export interface InclusionProof {
   leafIndex: number;
@@ -151,9 +152,13 @@ export function verifyInclusion(leaf: Buffer, proof: InclusionProof, rootHex: st
   return sn === 0 && r.toString("hex") === rootHex;
 }
 
-const LOCK_STALE_MS = 10_000;
-const LOCK_WAIT_MS = 20_000;
-const pause = (ms: number) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+const LOCK_STALE_MS = 60_000;
+const LOG_LOCK_WAIT_MS = 20_000;
+
+/** Each hook of a coding agent is its own process, so appends overlap: one writer at a time holds `<file>.lock`. */
+export function logLocked<T>(file: string, fn: () => T): T {
+  return withLock(`${file}.lock`, { staleMs: LOCK_STALE_MS, waitMs: LOG_LOCK_WAIT_MS }, fn);
+}
 
 export class MerkleLog {
   private readonly hashes: Buffer[] = [];
@@ -168,7 +173,11 @@ export class MerkleLog {
     this.catchUp();
   }
 
-  /** Reads the leaves that another handle or process appended since the last read. A file that was replaced or cut short is read again from the start. */
+  /**
+   * Reads the leaves that another handle or process appended since the last read. A file that was replaced or cut
+   * short is read again from the start. Bytes after the last newline are not read: a writer may be in the middle of its
+   * write, or may have died in it.
+   */
   private catchUp(): void {
     let st;
     try { st = statSync(this.file); } catch { st = null; }
@@ -192,6 +201,7 @@ export class MerkleLog {
     } finally {
       closeSync(fd);
     }
+    got = buf.subarray(0, got).lastIndexOf(0x0a) + 1;
     this.bytes += got;
     for (const line of buf.subarray(0, got).toString("utf8").split("\n")) {
       if (!line.trim()) continue;
@@ -203,38 +213,29 @@ export class MerkleLog {
   }
 
   /**
-   * Runs `fn` while this process holds `<file>.lock`, made with O_EXCL. Each hook of a coding agent is its own
-   * process, so appends overlap. A lock older than ten seconds belongs to a process that died: the next writer removes it.
+   * Under the lock: a last line with no newline is the remains of a writer that died in the middle of its write. No
+   * leaf was acknowledged for it. The bytes go to `<file>.torn`, so no data is lost, and the file ends after the last whole line.
    */
-  private locked<T>(fn: () => T): T {
-    const lock = `${this.file}.lock`;
-    const deadline = Date.now() + LOCK_WAIT_MS;
-    for (;;) {
-      try {
-        closeSync(openSync(lock, "wx"));
-        break;
-      } catch (e) {
-        if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
-      }
-      try {
-        if (Date.now() - statSync(lock).mtimeMs > LOCK_STALE_MS) unlinkSync(lock);
-      } catch {
-        // The holder released the lock between the two calls. Try again.
-      }
-      if (Date.now() > deadline) throw new Error(`${lock} is held by another process, so the log is not appended. Remove the file if no agent-custody process runs.`);
-      pause(2 + Math.random() * 8);
-    }
+  private cutTornTail(): void {
+    let size: number;
+    try { size = statSync(this.file).size; } catch { return; }
+    if (size <= this.bytes) return;
+    const tail = Buffer.alloc(size - this.bytes);
+    const fd = openSync(this.file, "r");
     try {
-      return fn();
+      readSync(fd, tail, 0, tail.length, this.bytes);
     } finally {
-      try { unlinkSync(lock); } catch { /* a writer removed it as stale */ }
+      closeSync(fd);
     }
+    appendFileSync(`${this.file}.torn`, tail, { mode: 0o600 });
+    truncateSync(this.file, this.bytes);
   }
 
   /** Under the lock: reads what other writers appended, then writes this line, so each leaf gets the next index. */
   private appendLine(line: string, hash: () => Buffer): InclusionProof & { rootHash: string } {
-    return this.locked(() => {
+    return logLocked(this.file, () => {
       this.catchUp();
+      this.cutTornTail();
       appendFileSync(this.file, line);
       this.bytes += Buffer.byteLength(line);
       return this.pushHash(hash());

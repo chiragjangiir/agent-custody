@@ -3,10 +3,10 @@
 // the Merkle tree, every root, and every inclusion and consistency proof for the remaining leaves are unchanged, while
 // the pruned receipt's content is gone from the log and its bundle file is removed. A verifier holding a pruned
 // receipt's bundle can still prove inclusion; nobody holding only the log can recover what the receipt said.
-import { existsSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Envelope } from "./crypto.ts";
-import { leafHash } from "./log.ts";
+import { leafHash, logLocked } from "./log.ts";
 
 /** where the issuer keeps the salts behind a receipt's commitments, under the receipts directory; private, pruned with the receipt */
 export const SALTS_DIR = "salts";
@@ -37,10 +37,21 @@ function receiptOf(leaf: string): { receiptId: string | null; timestamp: string 
 /**
  * Prunes every leaf whose receipt timestamp is before the cutoff. Leaves already pruned, and leaves that are not
  * receipts, are left as they are. Rewrites the log file in place and deletes the pruned receipts' bundle files, and
- * the salts the issuer kept for them.
+ * the salts the issuer kept for them. It holds the log lock, so a receipt that a hook appends during the prune is not lost.
  */
 export function pruneLog(logFile: string, before: string, receiptsDir?: string): PruneResult {
-  const lines = readFileSync(logFile, "utf8").split("\n").filter((l) => l.trim());
+  return logLocked(logFile, () => pruneLocked(logFile, before, receiptsDir));
+}
+
+function pruneLocked(logFile: string, before: string, receiptsDir?: string): PruneResult {
+  let text = readFileSync(logFile, "utf8");
+  const whole = text.lastIndexOf("\n") + 1;
+  if (whole < text.length) {
+    // the remains of a writer that died in its write: kept apart, as an append keeps them
+    appendFileSync(`${logFile}.torn`, text.slice(whole), { mode: 0o600 });
+    text = text.slice(0, whole);
+  }
+  const lines = text.split("\n").filter((l) => l.trim());
   const out: string[] = [];
   const result: PruneResult = { pruned: [], kept: 0, bundlesRemoved: 0 };
   lines.forEach((line, i) => {

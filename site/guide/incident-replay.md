@@ -67,6 +67,14 @@ A credential inside the agent's environment goes around the hook. Suppose the sh
 
 The starter policy matches the text of a command. It catches the plain form of each command. It does not catch a command that the agent writes in another way, for example with a variable or inside a script file. It is not a sandbox. The starter policy also catches `terraform apply -destroy`, which deletes the same stack as `terraform destroy`. It does not catch `terraform -chdir=infra destroy`, because the text between `terraform` and `destroy` breaks the pattern.
 
+The Cedar `like` operator has one wildcard, `*`. It cannot find where one shell command ends, and it cannot read shell words. So the limit has these parts:
+
+- A force push is caught as `--force`, `-f`, or `+refspec` (`git push origin +main`), also in the form `git -C repo push --force`. A flag counts when it is the first argument after `push`, when no `&`, `|`, `;`, or newline follows `push`, or when one of them follows the flag. A flag in a later command of a chain passes, so `git push origin main && npm install --force` runs. A chain with two operators after `push` is denied by mistake.
+- `rm -rf` on `/`, `~`, and `$HOME` is caught with the flags `-rf`, `-fr`, `-Rf`, `-fR`, `-r -f`, and the like, and with `$HOME` in double quotes. `rm --recursive --force /`, `rm --no-preserve-root -rf /`, and a path that reaches the directory in another way (`rm -rf /usr/..`) pass.
+- A force push that the git configuration or an alias sets is not in the text of the command.
+
+Use a sandbox or a protected branch for these. The rule ids stay the same when the starter policy grows: a change goes in the rule, and a new rule goes at the end of the file. The ids `policy3` and `policy5` on this page keep naming the same rules.
+
 An in-process receipt is the agent's own report. Every field in it is `claimed`. The signature shows that the receipt did not change after the hook issued it. It does not show that the hook saw every call. It does not show that anyone outside the agent's process checked the call. Step 5 shows that the receipts are intact. It does not show that the agent had no other way to act.
 
 To cover more, keep production credentials out of the agent's environment. Put a gateway between the agent and the tools that touch production. The [threat model](/receipts/threat-model) lists what each part defends and what it does not.

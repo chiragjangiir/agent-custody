@@ -48,13 +48,15 @@ The command sets up custody for your own Claude Code sessions. It prints each st
 
 1. It makes an agent key in `~/.config/agent-custody/keys/`.
 2. It writes `sdk.json` in `~/.config/agent-custody/` with `"mode": "observe"` and a `receiptsDir`. No log is configured, so the receipts stay on your machine.
-3. It writes a starter deny set to `policy.cedar`: force push, `rm -rf` on `/`, `~`, and `$HOME`, `terraform destroy`, `terraform apply -destroy`, and `drop database` in both cases. Each rule has a `@reason`, so the denial text says what the rule forbids. The policy permits every other call, and it permits `git push --force-with-lease` (see [The starter deny set](#the-starter-deny-set)).
+3. It writes a starter deny set to `policy.cedar`: force push (`--force`, `-f`, and `+refspec`), `rm -rf` on `/`, `~`, and `$HOME`, `terraform destroy`, `terraform apply -destroy`, and `drop database` in both cases. Each rule has a `@reason`, so the denial text says what the rule forbids. The policy permits every other call, and it permits `git push --force-with-lease` (see [The starter deny set](#the-starter-deny-set)).
 4. It registers the `PreToolUse`, `PostToolUse`, and `PostToolUseFailure` hooks in `.claude/settings.local.json` of the current directory. Claude Code adds that file to your global git ignore only when Claude Code itself creates it, so `init` does not rely on that. When the project is a git repository and git does not ignore the file, `init` prints a warning with the line to add to `.gitignore`: `.claude/settings.local.json`. The file holds absolute paths of your home directory. `init` never edits `.gitignore`. With `--user`, the hooks go to `~/.claude/settings.json` and apply to every project.
 5. It prints the next step: start a Claude Code session, then run the report.
 
 The hook command in the settings file uses absolute paths: the Node binary, the CLI script that runs now, and the absolute path of `sdk.json`. The command merges into an existing settings file. It keeps every other key and every other hook, and it does not add a hook that is already there. If the settings file is not valid JSON, the command stops with an error and changes nothing.
 
-Each hook is its own process, and Claude Code runs hooks at the same time for parallel tool calls, subagents, and several sessions. The local log `log.jsonl` takes the lock file `log.jsonl.lock` for each append, reads the leaves that other processes appended, and then writes its own leaf. A lock file that is older than ten seconds belongs to a process that died, and the next append removes it.
+Each hook is its own process, and Claude Code runs hooks at the same time for parallel tool calls, subagents, and several sessions. The local log `log.jsonl` takes the lock file `log.jsonl.lock` for each append, reads the leaves that other processes appended, and then writes its own leaf. The lock file holds an owner token, the process id, and the start time of the process. A holder removes the lock file only when it still holds its own token. A lock is stale when its process on this host is gone. The lock of a live process on this host is never broken. The lock of a process on another host, or a lock file with no readable owner, is stale when nobody touched it for 60 seconds. To break a stale lock, a writer first takes `log.jsonl.lock.break` with an exclusive create, so only one writer breaks at a time. It then reads the lock again, and moves it away only when its inode and token are still the ones it judged stale. A lock file that is gone between the create and the judgment is not broken: the writer tries the create again. The outbox of the gateway uses the same lock code. `agent-custody prune` takes the same lock, so a hook that appends during a prune waits and its leaf is kept.
+
+A writer that waits for the lock gives up after 20 seconds. A `PreToolUse` hook that gives up cannot record a denial: in enforce mode the call is still blocked, and the denial text ends with `no receipt: <reason>`. A `PostToolUse` or `PostToolUseFailure` hook that gives up exits with code 1 and prints the error on stderr. That receipt is lost, because the tool call has already run and the hook does not retry. The other receipts are not affected. If a process was killed in the middle of a write, the last line of `log.jsonl` has no newline. The next append moves those bytes to `log.jsonl.torn`, and the log continues after the last whole line. No leaf was returned for those bytes.
 
 The hook command pins the path of the Node binary that runs `init`. With nvm, a removed Node version breaks the hook, and every tool call then prints an error. After you remove a Node version, run `init` again. The second run updates the path.
 
@@ -76,15 +78,29 @@ Each rule matches the text of a Bash command with the Cedar `like` operator, and
 
 | command | the policy |
 | --- | --- |
-| `git push --force`, `git push -f`, `git push origin main -f` | denied |
-| `git push --force-with-lease` | allowed. It is a force push that fails when the remote has new commits, so it is the safer form. The `@reason` of the rule says so |
-| `git push origin main && rm -f stale.lock`, `git push origin fix-f` | allowed |
-| `rm -rf /`, `rm -fr /`, `rm -rf /*`, `rm -rf ~`, `rm -rf $HOME`, `rm -rf ${HOME}` | denied |
-| `rm -rf /tmp/build`, `rm -rf ~/projects/app/dist` | allowed |
+| `git push --force`, `git push -f`, `git push origin main -f`, `git push origin -f main`, `git push origin +main`, `git -C repo push --force` | denied |
+| `git push origin main --force && gh pr create`, `git push origin +main && echo done` | denied |
+| `git push --force-with-lease`, `git -C repo push --force-with-lease` | allowed. It is a force push that fails when the remote has new commits, so it is the safer form. The `@reason` of the rule says so |
+| `git push origin main && rm -f stale.lock`, `git push origin fix-f`, `git push origin main && npm install --force`, `git push && git status -f` | allowed |
+| `rm -rf /`, `rm -fr /`, `rm -Rf /`, `rm -r -f /`, `rm -rf /*`, `rm -rf ~`, `rm -rf $HOME`, `rm -rf "$HOME"`, `rm -rf ${HOME}` | denied |
+| `rm -rf /tmp/build`, `rm -rf ~/projects/app/dist`, `rm -rf "$HOME"/projects/app/dist` | allowed |
 | `terraform destroy`, `terraform apply -destroy` | denied |
 | `terraform plan`, `terraform plan -destroy` | allowed |
 
-A `--force` flag matches anywhere after `git push`. A `-f` flag matches right after `git push` or at the end of the command. A `-f` in the middle of a command does not match. The reason is that `like` cannot find where one shell command ends and the next starts, and a match there would block `git push origin main && rm -f stale.lock`. `test/claude-init.test.ts` runs every command of this table.
+A force push has `--force`, `-f`, or a refspec that starts with `+`. The push can be `git push` or `git -C <dir> push` (any `git` option before `push`). A flag counts in three cases: it is the first argument after `push`, or no `&`, `|`, `;`, or newline follows `push`, or one of them follows the flag. A flag that comes after an operator belongs to another command, so `git push origin main && npm install --force` passes.
+
+The `rm` rules know the flags `-rf`, `-fr`, `-Rf`, `-fR`, and the separate forms `-r -f`, `-f -r`, `-R -f`, `-f -R`. The home directory can be `~`, `$HOME`, or `${HOME}`, and `$HOME` can be in double quotes.
+
+The rule ids are the place of each rule in `policy.cedar`: the permit rule is `policy0`, the force push rule is `policy1`, and `terraform destroy` is `policy5`. Change a rule in place, and add a new rule at the end of the file, so that an id keeps naming the same rule. Receipts, reports, and pages name rules by id.
+
+What Cedar `like` cannot express, and the starter policy therefore does not catch:
+
+- `like` has `*` and nothing else. It cannot find where one shell command ends. A chain with two operators after `git push` can be denied by mistake: `git push && npm install --force && echo done` is denied.
+- It cannot read shell words. These forms pass: `rm --recursive --force /`, `rm --no-preserve-root -rf /`, `terraform -chdir=infra destroy`, a command in a variable or in a script file, and a path that reaches the same directory (`rm -rf /usr/..`).
+- It cannot tell a flag from the text of an argument. `git push origin "message -f"` is denied.
+- A force push that the git configuration or an alias sets (a `+` in `remote.<name>.push`) is not in the text of the command.
+
+Use a sandbox, or a protected branch on the remote, for these. `test/claude-init.test.ts` runs every command of this table and of this list.
 
 ### The denial text
 
@@ -110,7 +126,7 @@ The receipt does not change. It keeps the policy ids and the policy digest, and 
 agent-custody report --config ~/.config/agent-custody/sdk.json
 ```
 
-`init` prints this command with absolute paths. The report reads the receipts directory of the config and verifies each receipt with the agent's key. Then it prints `would have denied N calls`, and for each call the tool, the command or the file path, the `@reason` of the rule when it has one, the Cedar rule, and the receipt id. A receipt that does not verify is counted apart, listed with the reason, and never counted as a denial. The command then exits with code 1. The report ends with the next step: remove the `"mode": "observe"` line from `sdk.json` to enforce the policy. A denial that the policy enforced (a config without the observe line) is listed apart as `denied`.
+`init` prints this command with absolute paths. The report reads the receipts directory of the config and verifies each receipt with the agent's key. Then it prints `would have denied N calls`, and for each call the tool, the command or the file path, the `@reason` of the rule when it has one, the Cedar rule (cut to 160 characters), and the receipt id. A receipt that does not verify is counted apart, listed with the reason, and never counted as a denial. The command then exits with code 1. The report ends with the next step: remove the `"mode": "observe"` line from `sdk.json` to enforce the policy. A denial that the policy enforced (a config without the observe line) is listed apart as `denied`.
 
 `policy simulate` answers another question: what a proposed policy would change in recorded history. Use `report` to read what the policy in the config decided in observe mode.
 

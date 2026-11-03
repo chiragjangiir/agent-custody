@@ -223,6 +223,9 @@ describe("the starter policy", () => {
       "rm -rf $HOME", "rm -fr $HOME", "rm -rf $HOME/", "rm -rf $HOME/*", "rm -rf ${HOME}", "rm -rf $HOME && echo done",
       "terraform destroy -auto-approve", "terraform apply -destroy", "terraform apply -auto-approve -destroy",
       "psql -c 'drop database prod'", "psql -c 'DROP DATABASE prod'",
+      "git push origin +main", "git push +main", "git push -u origin +HEAD:main", "git push origin -f main", "git push origin main -f && git status", "git push origin main --force && gh pr create", "git push origin +main && echo done", "cd repo && git push origin main --force", "git -C repo push --force", "git -C repo push origin +main", "git -c core.x=y push -f", "git push --force 2>&1",
+      "rm -Rf /", "rm -fR /", "rm -r -f /", "rm -f -r /", "rm -R -f /*", "sudo rm -Rf /", "rm -Rf ~", "rm -r -f ~/",
+      'rm -rf "$HOME"', 'rm -rf "${HOME}"', 'rm -rf "$HOME/"', 'rm -rf "$HOME"/', 'rm -r -f "$HOME"', "rm -Rf $HOME", "rm -r -f ${HOME}",
     ]) {
       expect(decide(bad), bad).toBe("deny");
     }
@@ -230,11 +233,16 @@ describe("the starter policy", () => {
       "ls -la", "git push origin main", "git push origin fix-f", "git push origin main && rm -f stale.lock", "git push --force-with-lease", "git push --force-with-lease origin main", "git push -u origin feature/force-x",
       "rm -f stale.lock", "rm -rf node_modules", "rm -rf /tmp/build", "rm -fr /tmp/build", "rm -rf ~/projects/app/dist", "rm -rf $HOME/projects/app/dist", "rm -rf ${HOME}/cache/x", "rm -rf $HOMEWORK",
       "terraform plan", "terraform plan -destroy", "terraform apply", "terraform apply -auto-approve",
+      "git push origin main && npm install --force", "git push && git status -f", "git push origin main 2>&1 | tail -f out.log", "git push origin main && echo a +b", "git push origin main && curl -fsSL https://example.com/x",
+      "git -C repo push --force-with-lease", "git -C repo status", "git -C repo push origin main", "git log --force-x",
+      "rm -r -f /tmp/build", "rm -Rf ./build", "rm -Rf /tmp/x", 'rm -rf "$HOME"/projects/app/dist', 'rm -rf "${HOME}/cache/x"', "rm -R -f ~/projects/app/dist",
     ]) {
       expect(decide(fine), fine).toBe("allow");
     }
     // Known gaps, which docs/sdk.md and the incident replay page state.
-    for (const missed of ["terraform -chdir=infra destroy", "git push origin -f main"]) expect(decide(missed), missed).toBe("allow");
+    for (const missed of ["terraform -chdir=infra destroy", "rm --recursive --force /", "rm --no-preserve-root -rf /", "rm -rf /usr/.."]) expect(decide(missed), missed).toBe("allow");
+    // Known false positive: two operators follow the push, and the flag comes before the second one.
+    for (const wrong of ["git push && npm install --force && echo done", 'git push origin "message -f"']) expect(decide(wrong), wrong).toBe("deny");
   });
 });
 
@@ -276,7 +284,7 @@ describe("report", () => {
     const report = denyReport(configFile);
     expect(report).toMatchObject({ observe: true, verified: 3, denied: [], unverified: [] });
     expect(report.wouldDeny.map((c) => [c.tool, c.target])).toEqual([["Bash", "git push --force origin main"], ["Bash", "terraform destroy"]]);
-    expect(report.wouldDeny[0]!.rules[0]).toContain("git push*--force");
+    expect(report.wouldDeny[0]!.rules[0]).toContain("git push --force");
     expect(report.wouldDeny[0]!.rules[0]).not.toContain("@reason");
     expect(report.wouldDeny[1]!.reasons).toEqual(["terraform destroy deletes infrastructure"]);
     const ids = readdirSync(join(home, ".config", "agent-custody", "receipts")).map((f) => f.replace(".json", ""));

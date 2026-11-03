@@ -246,7 +246,8 @@ If a vendor tells you their receipts prove more than the first five rows, ask th
 ```
 src/config.ts      gateway and SDK config schemas, path resolution
 src/crypto.ts      canonical JSON, sha256, Ed25519 keys, DSSE sign/verify
-src/log.ts         Merkle log: append, root, inclusion and consistency proofs, verify, JSONL persistence; an O_EXCL lock file makes an append safe when several processes share one log file
+src/log.ts         Merkle log: append, root, inclusion and consistency proofs, verify, JSONL persistence; a lock file makes an append safe when several processes share one log file, and a partial last line from a killed writer is moved to `<file>.torn`
+src/lock.ts        the one lock file design (owner token, liveness check, rename to break a stale lock) that the local log, prune, and the gateway outbox share
 src/log-check.ts   the outside monitor: verifies the head, checkpoints, witness, and anchor of a running log
 src/portal.ts      the tenant portal: register, first key, usage against plan, keys, Stripe billing, export, member roles, TOTP MFA, single sign-on, on the log's Postgres
 src/sso.ts         enterprise sign-in for the portal: OIDC (code and PKCE, id_token checked against the IdP's key set) and SAML 2.0 (signed assertions only, through @node-saml/node-saml)
