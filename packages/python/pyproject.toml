@@ -1,6 +1,6 @@
 [project]
 name = "agent-custody"
-version = "0.13.0"
+version = "0.14.0"
 description = "Signed, verifiable receipts for AI agent tool calls, from Python, through the agent-custody sidecar"
 readme = "README.md"
 license = "Apache-2.0"
