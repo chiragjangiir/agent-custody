@@ -60,5 +60,7 @@ export * from "./sidecar.ts";
 export * from "./upstream.ts";
 export * from "./retention.ts";
 export * from "./simulate.ts";
+export * from "./pr-summary.ts";
+export * from "./export.ts";
 export * from "./claude-init.ts";
 export * from "./deny-report.ts";

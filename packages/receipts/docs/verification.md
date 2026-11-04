@@ -69,6 +69,10 @@ execution       observed    executed
 
 A refused call's `execution` row carries the reason the receipt records, for example `denied: delegation grant has been revoked`, and so does a `withheld` one. Under a capture rule the reason is a commitment, and the row says `(reason withheld under the capture rule)` rather than printing it.
 
+## A directory of receipts, as a Markdown table
+
+`verify --markdown <dir> --issuer-key <pub>` verifies every bundle in a directory and prints one table: the receipt id, the tool, the status (`executed`, `denied`, `failed`, `error`, `withheld`), and `verified` or the names of the failed checks. It takes the same key and log options as `verify`. It reads regular `.json` files only, not symbolic links in the directory; it follows a link that is itself the file argument or the directory argument, and the table shows only fixed error text or verified fields. It does not combine with `--json` or `--disclose`. The exit code is 1 when one receipt does not verify and when the directory holds no receipt. The [GitHub Action](github-action.md) posts this table on a pull request. A receipt that goes into a repository publishes its arguments and result unless a capture rule withholds them; that page says how to commit private receipts.
+
 ## What each check means
 
 | check | what it establishes | what a failure usually means |

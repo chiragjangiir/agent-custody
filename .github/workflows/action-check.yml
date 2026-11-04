@@ -1,0 +1,73 @@
+# Runs the GitHub Action in action.yml on each pull request that can change it. The CLI comes from a tarball of this
+# commit, not from npm, so the action is tested with the code it will ship. Two runs: signed receipts that must
+# verify, and the same receipts with one changed byte, which must fail.
+name: action
+
+on:
+  pull_request:
+    paths:
+      - action.yml
+      - packages/receipts/src/**
+      - .github/workflows/action-check.yml
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  action:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.3.2
+      - run: bun install --frozen-lockfile
+      - run: bun run --cwd packages/receipts build
+      - name: Pack the CLI from this commit
+        id: pack
+        run: |
+          (cd packages/receipts && bun pm pack --destination "$RUNNER_TEMP/pack")
+          echo "version=file:$(ls "$RUNNER_TEMP"/pack/agent-custody-receipts-*.tgz)" >> "$GITHUB_OUTPUT"
+      - name: Write receipts from the signed vectors
+        run: |
+          node --input-type=module - "$RUNNER_TEMP/fx" <<'EOF'
+          import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+          import { join } from "node:path";
+          const out = process.argv[2];
+          const v = JSON.parse(readFileSync("packages/receipts/vectors/receipts.json", "utf8"));
+          const bundle = (name) => v.cases.find((c) => c.name === name).bundle;
+          const id = (b) => JSON.parse(Buffer.from(b.envelope.payload, "base64")).predicate.receiptId;
+          const good = [bundle("gateway-executed-no-log-copy"), bundle("gateway-denied")];
+          const bad = structuredClone(good);
+          const p = bad[0].envelope.payload;
+          bad[0].envelope.payload = p.slice(0, 40) + (p[40] === "A" ? "B" : "A") + p.slice(41);
+          for (const [dir, set] of [["good", good], ["bad", bad]]) {
+            mkdirSync(join(out, dir), { recursive: true });
+            set.forEach((b, i) => writeFileSync(join(out, dir, `${id(good[i])}.json`), JSON.stringify(b)));
+          }
+          writeFileSync(join(out, "gateway.pub"), v.keys.gateway.publicKeyPem);
+          writeFileSync(join(out, "principal.pub"), v.keys.principal.publicKeyPem);
+          EOF
+      - name: Signed receipts verify, and the result goes on the pull request
+        uses: ./
+        with:
+          path: ${{ runner.temp }}/fx/good
+          issuer-key: ${{ runner.temp }}/fx/gateway.pub
+          principal-key: ${{ runner.temp }}/fx/principal.pub
+          version: ${{ steps.pack.outputs.version }}
+      - name: A receipt with one changed byte fails the step
+        id: tampered
+        continue-on-error: true
+        uses: ./
+        with:
+          path: ${{ runner.temp }}/fx/bad
+          issuer-key: ${{ runner.temp }}/fx/gateway.pub
+          principal-key: ${{ runner.temp }}/fx/principal.pub
+          version: ${{ steps.pack.outputs.version }}
+          github-token: ""
+      - name: The tampered run must have failed
+        if: steps.tampered.outcome != 'failure'
+        run: |
+          echo "::error::The action passed a receipt with one changed byte."
+          exit 1

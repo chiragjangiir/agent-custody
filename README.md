@@ -224,6 +224,7 @@ Everything runs on plain Node 22 or later. No build step. Package-level commands
 ```
 package.json          workspace root: typecheck, test, and demo across packages
 tsconfig.base.json    compiler options shared by every package
+action.yml            the GitHub Action that verifies receipts on a pull request (packages/receipts/docs/github-action.md)
 packages/receipts/    the receipts package: src, test, examples, scripts, docs
 packages/python/      the Python client package: agent_custody, tests run with uv against a real sidecar
 packages/state/       the state package: src, test, examples

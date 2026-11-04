@@ -5,7 +5,7 @@ A receipt is verified with public keys alone: no server, no account, no trust in
 ## `verify`
 
 ```bash
-agent-custody verify receipts/<id>.json --issuer-key keys/gateway.pub --principal-key keys/principal.pub [--approval-key approver.pub] [--log-key log.pub | --log-url https://log.example.com/] [--log-id acme] [--require-strict] [--upstream-key upstream.pub] [--stripe-secret-env NAME] [--github-secret-env NAME] [--log log.jsonl] [--disclose disclosure.json] [--capture-key-env NAME] [--json]
+agent-custody verify receipts/<id>.json --issuer-key keys/gateway.pub --principal-key keys/principal.pub [--approval-key approver.pub] [--log-key log.pub | --log-url https://log.example.com/] [--log-id acme] [--require-strict] [--upstream-key upstream.pub] [--stripe-secret-env NAME] [--github-secret-env NAME] [--log log.jsonl] [--disclose disclosure.json] [--capture-key-env NAME] [--json] [--markdown]
 ```
 
 | option | meaning |
@@ -22,6 +22,7 @@ agent-custody verify receipts/<id>.json --issuer-key keys/gateway.pub --principa
 | `--disclose` | a disclosure file: `{ "receiptId", … }` with `{ "$custody": "disclosed", "salt", "value" }` at the paths a capture rule withheld (`request.args.$rest`, `execution.result.$rest`, `execution.error`, `execution.upstream.rawBody`, `execution.upstream.signature`, `execution.upstream.bind`, `execution.upstream.envelope`, `policy.errors`, `facts.<name>.value.$rest`, `facts.<name>.args.<field>`, `facts.<name>.resultDigest`, `consumed.factIds`, `model.id`, `session.id`), any part of them, as `reveal` writes it or as the party that holds the values and the salts hands it over; each value is checked against its commitment under its salt and the digests are recomputed; a value without its salt, or a file for another receipt, is refused |
 | `--capture-key-env` | the environment variable holding the customer's capture key; encrypted fields are decrypted, checked against their commitments, and the digests recomputed; a key that is not theirs fails the checks, naming the key id |
 | `--json` | machine-readable output |
+| `--markdown` | the arguments are directories of bundles (or bundle files), and the output is one Markdown table instead of a report; see [verify --markdown](#verify-markdown). It does not combine with `--json` or `--disclose` |
 
 Exit 0 when every check passes, 1 otherwise. The text report is one line per check, `PASS`/`FAIL`, the name, and a detail, ending in `RESULT: VERIFIED` or `RESULT: NOT VERIFIED`. The JSON:
 
@@ -71,6 +72,53 @@ An approval record makes its checks mandatory for a forwarded call, even when `a
 | tree head signature, tree head names the expected log | the head was signed by an issuer or log key, and by the log the verifier expected |
 | log inclusion proof | the leaf is in the tree the head describes |
 | log file root matches | with `--log`, the copy's root at that size equals the head's |
+
+### `verify --markdown`
+
+```bash
+agent-custody verify --markdown .custody/receipts --issuer-key keys/agent.pub [--principal-key keys/principal.pub] [--log-url https://log.example.com/] [--log-id acme]
+```
+
+The command verifies each `<id>.json` in the directory, except `<id>.authorization.json` files, subdirectories, and symbolic links, with the same keys and options as `verify`. `verify --markdown` follows a symbolic link when the link is the file argument or the directory argument itself, but not a link inside the directory. The table shows only fixed error text or verified fields, so a followed link shows no text from its target. It prints this, and nothing else, on stdout:
+
+```
+<!-- agent-custody -->
+## agent-custody receipts
+
+**Not verified.** 1 of 2 receipts do not verify.
+
+| Receipt | Tool | Status | Result |
+| --- | --- | --- | --- |
+| `981d2afd-63f2-49ed-854a-83fc1bf1c035` | - | - | `receipt signature (issuer key)` |
+| `6e2de8f3-4e51-43e5-af8b-a2b283dd7709` | `stripe.refund` | executed | verified |
+```
+
+The failed rows come first, and the table has 200 rows at most. `Status` is the execution status in the signed receipt, or `-` when the signature does not verify. A file whose name is not its receipt id fails with `file name matches receipt id`. Text from a receipt is sanitized, so it cannot break the table or add Markdown or HTML. A file that is not valid JSON shows `not a JSON file`, and a file with the wrong shape shows `not a receipt bundle`; the table never quotes the file. Exit 1 when one receipt does not verify, when the directory holds no receipt, and when the path does not exist.
+
+In code: `summarizeReceipts(receiptFiles(dir), options): { ok, rows, problem? }` and `formatSummaryMarkdown(summary): string`. The first line of the output is `SUMMARY_MARKER`.
+
+The [GitHub Action](/receipts/github-action) in this repository runs this command and posts the table on a pull request. Its inputs are `path`, `issuer-key`, `principal-key`, `log-url`, `log-id`, `version`, `github-token`, and `comment-author`.
+
+### `export`
+
+```bash
+agent-custody export --receipts ~/.config/agent-custody/receipts --out .custody/receipts --issuer-key keys/agent.pub [--issuer-key keys/other.pub] [--principal-key keys/principal.pub] [--approval-key keys/approver.pub] [--since 2026-11-02T09:00:00Z] [--allow-clear]
+```
+
+The command puts receipts into a directory that goes into a pull request. For each `<id>.json` at the top level of `--receipts`, it does these steps in order.
+
+1. It verifies the receipt with the issuer keys. It refuses a receipt that does not verify, and a receipt whose file name is not its signed receipt id (`file name matches receipt id`). `--issuer-key` is required, because the privacy check trusts the signed capture note.
+2. It skips a receipt issued before `--since`. `--since` takes an ISO time that starts with a date, for example `2026-11-02` or `2026-11-02T09:00:00Z`. A receipt issued at that time is kept.
+3. It refuses a receipt when a side that holds data has no withheld path under it in the signed capture note. The sides are `args` (`request.args`), `result` (`execution.result`, the error message, and the denial reason), and `facts` (the value of each fact). A field that a rule lists in its `clear` list is allowed when the rule withholds the other fields of that side. `--allow-clear` turns the check off; the command then marks the receipt `(plain values: ...)` and prints a warning on standard error.
+4. It copies the file byte for byte, and writes nothing for a refused or skipped receipt. The command creates `--out` when it copies a receipt.
+
+The command never reads or copies `salts/`, `outbox/`, `*.authorization.json`, a subdirectory, a symbolic link, or a file that does not end in `.json`. A `.json` file that is not a receipt bundle is refused.
+
+It prints one line for each receipt (`copied`, `refused` with the reason, or `skipped`), then `<n> copied, <n> refused, <n> skipped`. Exit 1 when it refuses a receipt, and when it copies none. The receipts that pass are copied even when the exit code is 1.
+
+A side whose every field is on the `clear` list has no commitment, and the check cannot tell it from a side in mode `clear`. The command refuses it. [Receipts on a pull request](/receipts/github-action#how-receipts-get-into-the-pull-request) has the capture rules that keep receipts safe to commit, and their limits.
+
+In code: `exportReceipts({ receiptsDir, outDir, verify, since?, allowClear? }): ReceiptExportResult` (`{ lines, copied, refused, skipped, problem? }`), `formatReceiptExport(result): string[]`, and `clearSides(predicate): string[]`.
 
 ## `reveal`
 

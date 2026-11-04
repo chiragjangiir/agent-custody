@@ -1,0 +1,89 @@
+name: agent-custody receipts
+description: Verify agent-custody receipt bundles and post the result on the pull request.
+
+inputs:
+  path:
+    description: A directory of receipt bundles. The action reads the .json files in it, not its subdirectories.
+    default: .custody/receipts
+  issuer-key:
+    description: The public key files of the receipt issuers, one path on each line.
+    required: true
+  principal-key:
+    description: The public key files of the principals whose grants a gateway receipt carries, one path on each line. SDK receipts and Claude Code hook receipts need none.
+    default: ""
+  log-url:
+    description: The URL of the log that holds the receipts. The action fetches the log key from it.
+    default: ""
+  log-id:
+    description: The log id that every tree head must name.
+    default: ""
+  version:
+    description: The version of @agent-custody/receipts to run. The action runs it with npx.
+    default: 0.15.0
+  github-token:
+    description: A token that can write pull request comments. Without that right, the action writes the job summary only.
+    default: ${{ github.token }}
+  comment-author:
+    description: The login of the account that github-token posts as. The action edits only a comment from this account. Change it when you give a token of a user or of an app.
+    default: "github-actions[bot]"
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+      with:
+        node-version: 22
+    - name: Verify the receipts and report the result
+      shell: bash
+      env:
+        INPUT_PATH: ${{ inputs.path }}
+        INPUT_ISSUER_KEY: ${{ inputs.issuer-key }}
+        INPUT_PRINCIPAL_KEY: ${{ inputs.principal-key }}
+        INPUT_LOG_URL: ${{ inputs.log-url }}
+        INPUT_LOG_ID: ${{ inputs.log-id }}
+        INPUT_VERSION: ${{ inputs.version }}
+        GH_TOKEN: ${{ inputs.github-token }}
+        COMMENT_AUTHOR: ${{ inputs.comment-author }}
+        REPO: ${{ github.repository }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+      run: |
+        set -uo pipefail
+        marker='<!-- agent-custody -->'
+        summary="$RUNNER_TEMP/agent-custody-summary.md"
+
+        args=(verify --markdown "$INPUT_PATH")
+        while IFS= read -r key; do
+          if [ -n "$key" ]; then args+=(--issuer-key "$key"); fi
+        done <<< "$INPUT_ISSUER_KEY"
+        while IFS= read -r key; do
+          if [ -n "$key" ]; then args+=(--principal-key "$key"); fi
+        done <<< "$INPUT_PRINCIPAL_KEY"
+        if [ -n "$INPUT_LOG_URL" ]; then args+=(--log-url "$INPUT_LOG_URL"); fi
+        if [ -n "$INPUT_LOG_ID" ]; then args+=(--log-id "$INPUT_LOG_ID"); fi
+
+        status=0
+        npx --yes "@agent-custody/receipts@${INPUT_VERSION}" "${args[@]}" > "$summary" || status=$?
+        if [ ! -s "$summary" ]; then
+          printf '%s\n## agent-custody receipts\n\n**Not verified.** The verifier did not run. The job log has the reason.\n' "$marker" > "$summary"
+          if [ "$status" -eq 0 ]; then status=1; fi
+        fi
+
+        cat "$summary" >> "$GITHUB_STEP_SUMMARY"
+
+        if [ -n "$PR_NUMBER" ]; then
+          url="repos/${REPO}/issues/${PR_NUMBER}/comments"
+          # any user can post the marker line, so the author must match as well
+          comment_id=$(MARKER="$marker" gh api --paginate "$url" --jq '.[] | select(.user.login == env.COMMENT_AUTHOR and (.body | startswith(env.MARKER))) | .id' 2> /dev/null | tail -n 1)
+          posted=1
+          if [ -n "$comment_id" ]; then
+            gh api --method PATCH "repos/${REPO}/issues/comments/${comment_id}" -F body=@"$summary" > /dev/null 2>&1 && posted=0
+          fi
+          if [ "$posted" -ne 0 ]; then
+            gh api --method POST "$url" -F body=@"$summary" > /dev/null 2>&1 && posted=0
+          fi
+          if [ "$posted" -ne 0 ]; then
+            echo "::warning::The token cannot write a pull request comment. The result is in the job summary only."
+          fi
+        fi
+
+        exit "$status"
