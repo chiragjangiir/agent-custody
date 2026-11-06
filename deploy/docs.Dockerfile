@@ -1,6 +1,6 @@
 # docs.agent-custody.dev: the site built from this checkout and served as static files. Build context is the
 # repository root (the compose file sets it); the image carries only the built pages and a Caddy serving them.
-FROM oven/bun:1@sha256:ec06c3b6cea04192ae6770c434f668ca41d343ad19fa6472216c7b48be39c598 AS build
+FROM oven/bun:1@sha256:1d22548f177f4ff38e0c15baa3c2c46c6c2060ba2d1bc573bb4720b407548f1d AS build
 WORKDIR /src
 COPY . .
 RUN bun install --frozen-lockfile --ignore-scripts && bun run site:build
