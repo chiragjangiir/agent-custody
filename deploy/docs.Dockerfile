@@ -5,6 +5,6 @@ WORKDIR /src
 COPY . .
 RUN bun install --frozen-lockfile --ignore-scripts && bun run site:build
 
-FROM caddy:2-alpine@sha256:d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f75f
+FROM caddy:2-alpine@sha256:e70b164da81ef698b3ad19af799ea6086ce6d9e48ed4079eb9fe26f6fbf14ee5
 COPY --from=build /src/site/.vitepress/dist /srv
 COPY deploy/docs.Caddyfile /etc/caddy/Caddyfile
