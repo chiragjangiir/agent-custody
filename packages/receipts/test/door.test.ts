@@ -12,13 +12,13 @@ import { createServer, request, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { checkDoorConfig, isDoorConfig } from "../src/check.ts";
 import { loadDoorConfig } from "../src/config.ts";
 import { generateKeyPair, loadPublicKey, sha256Hex } from "../src/crypto.ts";
 import { createDelegation } from "../src/delegation.ts";
 import { isCommitment } from "../src/capture.ts";
-import { AGENT_HEADER, ARRIVAL_FACT, CLASS_HEADER, RECEIPT_HEADER, cedarArgs, createDoorHost, matchRoute, normalizePath, queryOf, remoteOf, serveDoor, type Arrival, type DoorHost, type RunningDoor } from "../src/door.ts";
+import { AGENT_HEADER, ARRIVAL_FACT, CLASS_HEADER, RECEIPT_HEADER, cedarArgs, createDoorHost, createRateTracker, matchRoute, RATE_BURST_MS, RATE_MINUTE_MS, normalizePath, queryOf, remoteOf, serveDoor, type Arrival, type DoorHost, type RunningDoor } from "../src/door.ts";
 import { grantHeader } from "../src/gateway-http.ts";
 import type { LogSink } from "../src/log-sink.ts";
 import type { ReceiptBundle, ReceiptStatement } from "../src/receipt.ts";
@@ -123,7 +123,170 @@ describe("routes", () => {
   });
 });
 
+describe("rate", () => {
+  it("counts one source's arrivals in the last 10 and 60 seconds, this one included, and forgets what is older", () => {
+    let t = 1_000_000;
+    const tracker = createRateTracker(() => t);
+    expect(tracker.hit("remote:1.2.3.4")).toEqual({ burst: 1, minute: 1 });
+    t += 5_000;
+    expect(tracker.hit("remote:1.2.3.4")).toEqual({ burst: 2, minute: 2 });
+    expect(tracker.hit("remote:9.9.9.9")).toEqual({ burst: 1, minute: 1 });
+    t += 6_000;
+    expect(tracker.hit("remote:1.2.3.4")).toEqual({ burst: 2, minute: 3 });
+    t += 55_000;
+    expect(tracker.hit("remote:1.2.3.4")).toEqual({ burst: 1, minute: 2 });
+    tracker.close();
+  });
+
+  it("bounds itself: a client choosing a new key on every request cannot grow the map, nor make a key of any length", () => {
+    const t = 1_000_000;
+    const tracker = createRateTracker(() => t, { maxSources: 3, maxKeyLength: 16 });
+    try {
+      for (let i = 0; i < 100; i++) tracker.hit(`remote:10.0.0.${i}`);
+      expect(tracker.size()).toBe(3);
+      // the least recently seen go first: a source still arriving keeps its count
+      tracker.hit("remote:keep");
+      tracker.hit("remote:a");
+      tracker.hit("remote:b");
+      expect(tracker.hit("remote:keep")).toEqual({ burst: 2, minute: 2 });
+      tracker.hit("remote:c");
+      expect(tracker.hit("remote:keep")).toEqual({ burst: 3, minute: 3 });
+      // a key past the length limit is kept as its digest, and still counts as one source
+      const long = `remote:${"x".repeat(10_000)}`;
+      tracker.hit(long);
+      expect(tracker.hit(long)).toEqual({ burst: 2, minute: 2 });
+    } finally {
+      tracker.close();
+    }
+  });
+
+  it("an arrival exactly 10 s old is outside the burst window, and one exactly 60 s old outside the minute", () => {
+    let t = 1_000_000;
+    const tracker = createRateTracker(() => t);
+    tracker.hit("remote:a");
+    t += RATE_BURST_MS;
+    expect(tracker.hit("remote:a")).toEqual({ burst: 1, minute: 2 });
+    t += RATE_MINUTE_MS - RATE_BURST_MS;
+    expect(tracker.hit("remote:a")).toEqual({ burst: 1, minute: 2 });
+    t += 1;
+    expect(tracker.hit("remote:a")).toEqual({ burst: 2, minute: 3 });
+    tracker.close();
+  });
+
+  // One flooding address must not make each of its arrivals cost more than the last: the door counts before it reads
+  // the body or asks the policy, on the event loop every other arrival shares.
+  it("one arrival costs the same however many came before it in the window, and the counts stay exact", () => {
+    let t = 1_000_000;
+    const tracker = createRateTracker(() => t);
+    const timed = (n: number) => {
+      const start = performance.now();
+      for (let i = 0; i < n; i++) {
+        t += 0.5;
+        tracker.hit("remote:flood");
+      }
+      return (performance.now() - start) / n;
+    };
+    const early = timed(20_000);
+    const late = timed(200_000);
+    // 2000 arrivals a second for 110 s: the minute holds 120 000 of them, the burst 20 000, and this one at the same instant
+    expect(tracker.hit("remote:flood")).toEqual({ burst: 20_001, minute: 120_001 });
+    expect(late).toBeLessThan(Math.max(early * 5, 0.01));
+    tracker.close();
+  });
+
+  // A step of the wall clock (NTP, a VM resume) must not keep an hour-old burst inside the windows: a source that paused
+  // would be refused for the length of the step.
+  it("the default clock is monotonic: after the wall clock steps back an hour, a source that paused a minute counts from 1", () => {
+    // the sweep's timer stays real, so the count below is the windows' and not the sweep's
+    vi.useFakeTimers({ toFake: ["Date", "performance"] });
+    const tracker = createRateTracker();
+    try {
+      for (let i = 0; i < 31; i++) tracker.hit("remote:paused");
+      vi.advanceTimersByTime(RATE_MINUTE_MS + 1_000);
+      vi.setSystemTime(Date.now() - 3600_000);
+      expect(tracker.hit("remote:paused")).toEqual({ burst: 1, minute: 1 });
+    } finally {
+      tracker.close();
+      vi.useRealTimers();
+    }
+    // an injected clock that goes back is held at the last time seen, so the windows never run backwards
+    let t = 1_000_000;
+    const held = createRateTracker(() => t);
+    held.hit("remote:b");
+    t -= 3600_000;
+    expect(held.hit("remote:b")).toEqual({ burst: 2, minute: 2 });
+    t = 1_000_000 + RATE_MINUTE_MS;
+    expect(held.hit("remote:b")).toEqual({ burst: 1, minute: 1 });
+    held.close();
+  });
+
+  it("the minute sweep keeps a source still arriving and drops the quiet ones, which then count from 1", () => {
+    vi.useFakeTimers();
+    try {
+      const tracker = createRateTracker(() => Date.now());
+      for (let i = 0; i < 1500; i++) tracker.hit(`remote:10.0.2.${i}`);
+      tracker.hit("remote:active");
+      // 40 s on, only the active source arrives; the sweep runs at 60 s, when its first arrival and the quiet ones are 60 s old
+      vi.advanceTimersByTime(40_000);
+      for (let i = 0; i < 3; i++) tracker.hit("remote:active");
+      vi.advanceTimersByTime(30_000);
+      expect(tracker.size()).toBe(1);
+      expect(tracker.hit("remote:active")).toEqual({ burst: 1, minute: 4 });
+      expect(tracker.hit("remote:10.0.2.7")).toEqual({ burst: 1, minute: 1 });
+      tracker.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("drops a source with no arrival in the last minute even when no more traffic comes", () => {
+    vi.useFakeTimers();
+    try {
+      const tracker = createRateTracker(() => Date.now());
+      for (let i = 0; i < 50; i++) tracker.hit(`remote:10.0.1.${i}`);
+      expect(tracker.size()).toBe(50);
+      vi.advanceTimersByTime(2 * RATE_MINUTE_MS);
+      expect(tracker.size()).toBe(0);
+      tracker.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe("the door", () => {
+  it("every arrival carries its source's rate, by address for an unverified arrival and by agent for a verified one, and a policy can refuse on it", async () => {
+    const paced = buildDoorFixture(mkdtempSync(join(tmpdir(), "agent-custody-door-rate-")), origin.url);
+    writeFileSync(join(paced.dir, "policy.cedar"), 'permit(principal, action, resource);\nforbid(principal, action, resource) when { context.facts.arrival.rate.burst > 2 };\n');
+    const h = await createDoorHost(loadDoorConfig(paced.configFile));
+    const d = await serveDoor(h, { port: 0, log: () => {} });
+    const arrivalOf = (res: Response) => (decode(JSON.parse(readFileSync(join(paced.receiptsDir, `${res.headers.get(RECEIPT_HEADER)}.json`), "utf8")) as ReceiptBundle).predicate.facts[ARRIVAL_FACT]!.value as Arrival);
+    try {
+      const first = await fetch(`${d.url}/catalogue/shoes`);
+      const second = await fetch(`${d.url}/catalogue/hats`);
+      const third = await fetch(`${d.url}/admin`);
+      expect([first.status, second.status, third.status]).toEqual([200, 200, 403]);
+      expect(arrivalOf(first).rate).toEqual({ by: "remote", burst: 1, minute: 1 });
+      expect(arrivalOf(second).rate).toEqual({ by: "remote", burst: 2, minute: 2 });
+      expect(arrivalOf(third).rate).toEqual({ by: "remote", burst: 3, minute: 3 });
+      expect(JSON.parse(await third.text()).reason).toBe("policy1");
+      const agent = await fetch(`${d.url}/api/orders`, { headers: { authorization: `Bearer ${grantHeader(grantFor("shopping-agent", ["api"], paced.principalKey))}` } });
+      expect(agent.status).toBe(200);
+      expect(arrivalOf(agent)).toMatchObject({ class: "verified", rate: { by: "agent", burst: 1, minute: 1 } });
+      // The count is keyed on the agent only when a grant verified. A declared name or a grant from an untrusted key
+      // counts by address, so nobody can spend, or reset, a verified agent's count by naming it.
+      const declared = await fetch(`${d.url}/catalogue/x`, { headers: { [AGENT_HEADER]: "crawler-9" } });
+      const forged = await fetch(`${d.url}/api/orders`, { headers: { authorization: `Bearer ${grantHeader(grantFor("crawler-9", ["api"], generateKeyPair()))}` } });
+      expect(arrivalOf(declared).rate?.by).toBe("remote");
+      expect(arrivalOf(forged).rate?.by).toBe("remote");
+      const real = await fetch(`${d.url}/api/orders`, { headers: { authorization: `Bearer ${grantHeader(grantFor("crawler-9", ["api"], paced.principalKey))}` } });
+      expect(arrivalOf(real)).toMatchObject({ class: "verified", rate: { by: "agent", burst: 1, minute: 1 } });
+    } finally {
+      await d.close();
+      await h.close();
+    }
+  });
+
   it("an unknown arrival reads the catalogue: relayed, receipted as door/unknown with a claimed principal, and the receipt verifies", async () => {
     const r = await call("GET", "/catalogue/shoes?size=9&size=10&colour=red");
     expect(r.res.status).toBe(200);

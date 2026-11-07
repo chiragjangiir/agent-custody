@@ -60,7 +60,10 @@ The door records one fact for every arrival, `arrival`, observed by the door its
 | `signature` | boolean | an RFC 9421 `Signature-Input` header was present. **Not checked yet.** It is a claim |
 | `declared` | string | the `x-agent-custody-agent` header, when sent. A claim |
 | `remote` | string | the arrival's address |
+| `rate` | `{ by, burst, minute }` | arrivals from the same source in the last 10 and 60 seconds, this one included, whatever was decided about them, counted by this door process alone. `by` is `agent` for a verified arrival (counted by the agent's name across addresses) or `remote` (by address). A pace, not a verdict |
 | `method`, `path`, `route` | strings | what arrived, and the route it fell under |
+
+[Door signals](door-signals.md) says, for each field, what it establishes and what it does not, and how a policy should read it.
 
 There is no `human` class. The door cannot tell a person from a program that presents nothing, and it does not pretend to. A challenge step (a CAPTCHA or passkey integration) will add that branch; until then a policy that lets `unknown` through on a route is letting everything through on that route, and should say so.
 
@@ -141,7 +144,7 @@ The verifier runs `door receipt carries a policy decision` in place of the gatew
 
 ## What it does not do yet
 
-- Detect agents in web or API traffic. The only signals are the ones in the arrival fact, and `signature` and `declared` are claims.
+- Detect agents in web or API traffic. The only signals are the ones in the arrival fact: `signature` and `declared` are claims, and `rate` is a pace ([door signals](door-signals.md)).
 - Check RFC 9421 HTTP message signatures, Web Bot Auth directories, or AP2 mandates. The grant is the only passport today.
 - Challenge an arrival. There is no human branch.
 - Revoke a grant by a revocation list; a grant stands until it expires.

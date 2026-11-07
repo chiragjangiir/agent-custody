@@ -13,6 +13,7 @@ Anyone holding the public keys can verify a receipt offline. The agent is not tr
 - [Reference](https://docs.agent-custody.dev/reference/): every function, endpoint, MCP tool, and command with its request and response
 - [Tutorials](docs/tutorials.md): runnable examples, one per aspect of the code, all executed by the test suite
 - [The door](docs/door.md): a receipted reverse proxy in front of your own site or API; what it knows about an arrival, how an arrival becomes a Cedar request, what the arrival gets back, and what it does not do yet
+- [Door signals](docs/door-signals.md): every field of the arrival fact, labelled checked, observed, or a claim, with what it does and does not mean and how a policy should read it
 - [Financial operations](docs/financial-operations.md): durable operation ids, provider idempotency keys, atomic daily budget reservations, and reconciliation receipts for uncertain outcomes
 - [The gateway console](docs/console.md): an admin service for the person who runs a gateway: config, tools, receipts with a verdict each, a policy editor that replays recorded calls before it saves, grant revocation, and an audit trail
 - [Configuring the gateway](docs/configuration.md): who may use which tools and where the tools live, a worked example with two agents, the Docker image, and `agent-custody check` to validate a config before it starts
