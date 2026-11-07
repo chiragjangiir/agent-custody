@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import * as cedar from "@cedar-policy/cedar-wasm/nodejs";
 import { describe, expect, it } from "vitest";
 import { evaluate, policyReasons } from "../src/policy.ts";
+import { compileRego, evaluateRego } from "../src/policy-rego.ts";
 
 const doc = readFileSync(new URL("../docs/policies.md", import.meta.url), "utf8");
 const blocks = [...doc.matchAll(/```cedar\n([\s\S]*?)```/g)].map((m) => m[1]!);
@@ -123,5 +124,25 @@ describe("docs/policies.md examples", () => {
   it("8: grant is reachable from context", () => {
     expect(decide(8, req("stripe.refund", {}))).toBe("allow");
     expect(evaluate(blocks[8]!, { ...req("stripe.refund", {}), context: { args: {}, facts: {}, grant: { ...grant, principal: "someone-else" } } }).decision).toBe("deny");
+  });
+
+  it("the Rego example compiles and keeps the promises its prose makes", () => {
+    const rego = [...doc.matchAll(/```rego\n([\s\S]*?)```/g)].map((m) => m[1]!);
+    expect(rego.length).toBe(1);
+    const { policy, errors } = compileRego(rego[0]!);
+    expect(errors).toEqual([]);
+    const d = (r: ReturnType<typeof req>) => evaluateRego(policy!, "d", r);
+    expect(d(req("customer.lookup", {})).decision).toBe("allow");
+    expect(d(req("stripe.refund", { amount: 100000 }, { customer: { verified: true } })).decision).toBe("allow");
+    expect(d(req("stripe.refund", { amount: 100001 }, { customer: { verified: true } })).decision).toBe("deny");
+    // a whole number of pence above 0: Rego has floats and negatives, and <= alone admits both
+    for (const amount of [0, -1, 0.5, 99999.5, "500"]) expect(d(req("stripe.refund", { amount }, { customer: { verified: true } })).decision, String(amount)).toBe("deny");
+    expect(d(req("stripe.refund", { amount: 1 }, { customer: { verified: true } })).decision).toBe("allow");
+    // a missing attribute is undefined, so the rule does not hold: a deny without an error
+    expect(d(req("stripe.refund", {}, { customer: { verified: true } }))).toMatchObject({ decision: "deny", errors: [] });
+    // the agent's own claim of verification is not the gateway's fact
+    expect(d(req("stripe.refund", { amount: 1, customer: { verified: true } })).decision).toBe("deny");
+    // deny wins over allow, with its string as the reason
+    expect(d(req("stripe.refund", { amount: 1 }, { customer: { verified: true, flagged: true } }))).toMatchObject({ decision: "deny", reasons: ["this customer is flagged for review"] });
   });
 });

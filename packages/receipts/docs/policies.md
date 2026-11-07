@@ -1,6 +1,6 @@
 # Writing policies
 
-Policies are written in [Cedar](https://www.cedarpolicy.com/), the language AWS uses for AgentCore and Verified Permissions. There is no home-grown policy language here. Every example on this page is executed against the real evaluator in the test suite.
+Policies are written in [Cedar](https://www.cedarpolicy.com/), the language AWS uses for AgentCore and Verified Permissions, or in [Rego](https://www.openpolicyagent.org/docs/policy-language), the language of Open Policy Agent. There is no home-grown policy language here. Cedar is the default and most of this page uses it; [Rego](#rego) has its own section, including the choice between a Rego file the gateway compiles and an OPA server you already run. Every example on this page is executed against the real evaluator in the test suite.
 
 ## How a tool call becomes a Cedar request
 
@@ -167,6 +167,100 @@ when { context.args.space == "team:support" || (context.args.space == "org" && c
 permit(principal, action == Action::"memory.retract", resource)
 when { context.facts has target && context.facts.target.provenance == "claimed" };
 ```
+
+## Rego
+
+A gateway decides by Rego in one of two ways. Give `policyFile` a path ending in `.rego`, and the gateway compiles the file itself. Or give `opa` instead of `policyFile`, and the gateway asks an OPA server you run. Both read the same request and the same rules, so a policy moves between them unchanged.
+
+### The request and the rules
+
+The input is the Cedar request with plain strings for the three identifiers:
+
+| Rego | value |
+| --- | --- |
+| `input.principal` | the agent id from the grant |
+| `input.action` | the tool name |
+| `input.resource` | the tool name |
+| `input.context.args` | the call's arguments. **Provenance: claimed.** |
+| `input.context.facts` | the gateway's own upstream lookups. **Provenance: observed.** |
+| `input.context.grant` | `{ principal, scopes }` from the signed delegation. **Provenance: attested.** |
+
+The policy declares `package agentcustody` and defines two rules:
+
+- **`allow`**, a boolean. **Default deny:** the call is permitted only when `allow` is exactly `true`.
+- **`deny`**, a set of strings. Any entry wins over `allow`, as a Cedar `forbid` wins over a `permit`. Its strings are the reasons in the receipt and in the message the agent gets.
+- **Errors deny.** A policy that fails while it evaluates, or whose `allow` is not a boolean or whose `deny` is not a set of strings, denies the call. The receipt records the error.
+- **The scope check and the fact lookups run first**, exactly as for Cedar, and no policy can override them.
+
+The fixture policy from the top of this page, in Rego:
+
+```rego
+package agentcustody
+
+# Reads of customer records are permitted to any agent holding the scope.
+allow if input.action == "customer.lookup"
+
+# Refunds: a whole number of pence from 1 to 100000 (£1,000), and only for customers the gateway itself verified.
+allow if {
+	input.action == "stripe.refund"
+	amount := input.context.args.amount
+	is_number(amount)
+	amount == floor(amount)
+	amount > 0
+	amount <= 100000
+	input.context.facts.customer.verified == true
+}
+
+deny contains "this customer is flagged for review" if {
+	input.action == "stripe.refund"
+	input.context.facts.customer.flagged == true
+}
+```
+
+A missing attribute is *undefined* in Rego, not an error: the rule does not hold when there is no `amount`, so the call is denied. That is the same outcome as Cedar's error, reached a different way. Rego has floats, which Cedar does not, so `amount <= 100000` alone would hold for `0.5`, and for `0` and `-1` as well. Amounts are integer minor units: `amount == floor(amount)` holds only for a whole number, and `amount > 0` sets the floor.
+
+### A Rego file, or an OPA server
+
+| | `policyFile: "policy.rego"` | `opa: { "url": ... }` |
+| --- | --- | --- |
+| where the policy lives | a file beside `gateway.json`, as with Cedar | in the bundles of an OPA server your platform team runs |
+| how it is evaluated | compiled to WebAssembly by `opa build` when the file loads or changes, then evaluated inside the gateway | an HTTP query to the server's Data API for every call |
+| what it needs | the `opa` binary on `PATH` when the policy loads, never on a call. The gateway image includes it | a reachable server at an `https` URL, or `http` on a loopback address. A call it cannot answer within `timeoutMs` (default 2000) is denied |
+| what `policyDigest` in a receipt is | the sha256 of the file's text, as for Cedar. The portal can name it, and anyone with the file can check it | the sha256 of the decision URL and the revision of every bundle the server reports. Map it back with `receipts/policy-reloads.jsonl`. A call the server did not answer is denied under the URL's own "unanswered" digest, never under a revision that did not decide it |
+| changing the policy | write the file by rename. It applies from the next call, and a file that does not compile is refused while the policy in force stays | publish a new bundle revision. The first call under it records the new digest |
+| builtins | those the WebAssembly runtime supports. `http.send`, `time.now_ns`, and other builtins it cannot run are refused when the file loads | everything the server allows, including `http.send` |
+| best for | a gateway that should decide on its own, with the policy text pinned in every receipt | an organisation that already governs policy centrally in OPA and wants agents under the same bundles |
+
+**What a receipt can prove differs.** With a file, the receipt pins the exact text that decided, so a verifier holding the file can show it was this policy. With a server, the receipt pins only what the server *said* it was running: the bundle revisions in its `provenance` answer. The gateway asks for provenance on every query, records each new combination in `policy-reloads.jsonl` with the bundle names and revisions, and prints it. Serve the policy from a bundle built with `opa build --revision <id>`, so the revision names a version you can find again. A server that reports no revision still works, but the gateway warns at start and on each new answer that its receipts cannot name the policy. `agent-custody check` warns about it as well.
+
+**A server outside the policy also decides.** A Rego file is evaluated where the gateway runs, under the operator's control. An OPA server's answer is trusted as it comes back over HTTP. Run it where only your platform team can change it, and give the gateway a token with `tokenEnv` when the server requires one. Each query carries the call's arguments and that token, so the gateway refuses a plain `http` URL unless the host is a loopback address, and it never follows a redirect: a 3xx answer denies the call. The gateway refuses to start when it cannot reach the server, or when the server does not define the package.
+
+A gateway config with an OPA server:
+
+```json
+"opa": {
+  "url": "http://localhost:8181",
+  "decision": "agentcustody",
+  "tokenEnv": "OPA_TOKEN",
+  "timeoutMs": 2000
+}
+```
+
+`decision` is the package path under `/v1/data`, such as `authz/agents` for `package authz.agents`, and defaults to `agentcustody`. The document at that path must have the `allow` and `deny` rules above. The gateway posts `{ "input": ... }` to `<url>/v1/data/<decision>?provenance=true`.
+
+### Testing and simulating a Rego policy
+
+`opa test` runs Rego unit tests as usual. `evaluateRego` and `compileRego` from `@agent-custody/receipts` evaluate a policy exactly as the gateway does, with the same decision and digest:
+
+```ts
+import { compileRego, evaluateRego, policyDigest } from "@agent-custody/receipts";
+
+const text = readFileSync("policy.rego", "utf8");
+const { policy, errors } = compileRego(text); // errors: why it cannot load
+const d = evaluateRego(policy!, policyDigest(text), { agentId: "support-agent", tool: "stripe.refund", context: { args: { amount: 50000 }, facts: { customer: { verified: true } } } });
+```
+
+`agent-custody policy simulate --policy proposed.rego ...` replays recorded receipts against a Rego policy, including receipts a Cedar policy decided, so a move from Cedar to Rego can be checked against history before it is enforced. `agent-custody check` compiles a `.rego` file, or queries the OPA server once. An SDK issuer reads a `.rego` `policyFile` the same way. The console's policy editor, the deny report, and `init claude-code` work with Cedar only for now.
 
 ## Saying why a rule denies
 

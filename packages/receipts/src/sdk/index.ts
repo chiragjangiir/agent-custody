@@ -8,7 +8,8 @@ import { digestOf, loadPrivateKey } from "../crypto.ts";
 import { createIssuer } from "../issue.ts";
 import { openExporter } from "../otel.ts";
 import { openLog, type LogSink } from "../log-sink.ts";
-import { evaluate, policyReasons, type PolicyDecision } from "../policy.ts";
+import { evaluate, policyDigest, policyReasons, type PolicyDecision } from "../policy.ts";
+import { compileRego, evaluateRego, isRegoFile } from "../policy-rego.ts";
 import type { ReceiptBundle, ReceiptPredicate } from "../receipt.ts";
 
 export const SDK_VERSION = "0.1.0";
@@ -68,11 +69,17 @@ export function createSdkIssuer(cfg: SdkConfig): SdkIssuer {
   const issuer = createIssuer(key, cfg.receiptsDir, openLog(cfg, key), { exporter: openExporter(cfg), capture: { rules: cfg.capture, key: captureKey } });
   const policyText = cfg.policyFile ? readFileSync(cfg.policyFile, "utf8") : null;
 
-  const ruleReasons = policyText === null ? [] : policyReasons(policyText);
+  // a Rego file is compiled once, here: one that does not compile stops the issuer from being created
+  const rego = policyText !== null && isRegoFile(cfg.policyFile!) ? compileRego(policyText) : undefined;
+  if (rego && !rego.policy) throw new Error(`${cfg.policyFile} does not compile: ${rego.errors.join("; ")}`);
+  const regoDigest = rego ? policyDigest(policyText!) : "";
+
+  const ruleReasons = policyText === null || rego ? [] : policyReasons(policyText);
 
   const decide = (ev: ToolEvent): PolicyDecision | null => {
     if (policyText === null) return null;
-    const d = evaluate(policyText, { agentId: cfg.agentId, tool: ev.tool, context: { args: ev.args, facts: {} } });
+    const request = { agentId: cfg.agentId, tool: ev.tool, context: { args: ev.args, facts: {} } };
+    const d = rego?.policy ? evaluateRego(rego.policy, regoDigest, request) : evaluate(policyText, request);
     return cfg.mode === "observe" ? { ...d, enforced: false } : d;
   };
 

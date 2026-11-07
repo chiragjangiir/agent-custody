@@ -4,7 +4,7 @@ Chain of custody for AI agents: a signed receipt for every tool call, checkable 
 
 Two producers, one receipt format, one verifier.
 
-- **The gateway** is an MCP proxy between an agent and the systems it can affect: MCP servers, REST APIs described as tools, and other agents it delegates to over A2A. For every tool call, allowed or denied, it checks a delegation grant signed by the human principal and any required human approval of the exact arguments, gathers the facts the policy needs by calling upstream itself, evaluates a Cedar policy that fails closed, forwards the call only on allow, and emits a signed receipt appended to a Merkle transparency log.
+- **The gateway** is an MCP proxy between an agent and the systems it can affect: MCP servers, REST APIs described as tools, and other agents it delegates to over A2A. For every tool call, allowed or denied, it checks a delegation grant signed by the human principal and any required human approval of the exact arguments, gathers the facts the policy needs by calling upstream itself, evaluates a Cedar or Rego policy that fails closed (Rego from a file or from your own OPA server), forwards the call only on allow, and emits a signed receipt appended to a Merkle transparency log.
 - **The SDK** is an interceptor inside the agent's own process, hooked into the framework's tool-call callbacks: Claude Code, the Claude Agent SDK, the OpenAI Agents SDK, the Vercel AI SDK, OpenClaw, DeepSeek Harness, Hermes, Google ADK, LangChain, or any function you wrap. It reaches everything the gateway cannot see and issues the same receipts, labelled as self-reported.
 
 Anyone holding the public keys can verify a receipt offline. The agent is not trusted. The layer around it is, and the receipt says exactly how far that trust extends, starting with who issued it. What the receipt file carries of a call is a choice per tool: a field can be withheld as a commitment or encrypted under your key, and the verifier recomputes the digests when it is shown the values.
@@ -18,7 +18,7 @@ Anyone holding the public keys can verify a receipt offline. The agent is not tr
 - [Live Codex recovery demo](docs/codex-recovery.md): a real support agent, incorrect CRM memory, operator-reviewed compensation, and verified receipts; an opt-in live run with offline regression coverage
 - [Human approvals](docs/approvals.md): short-lived signatures over the exact action, two-person thresholds, single-use enforcement, and offline verification
 - [The interceptor SDK](docs/sdk.md): Claude Code hooks, the Claude Agent SDK, adapters for the OpenAI Agents SDK, Vercel AI SDK, LangChain, OpenClaw and DeepSeek Harness, a Hermes Agent plugin and Google ADK callbacks through the Python package, and wrapping tool functions in anything else
-- [Writing policies](docs/policies.md): how a tool call becomes a Cedar request, with tested examples, and replaying history against a proposed policy with `policy simulate`
+- [Writing policies](docs/policies.md): how a tool call becomes a Cedar request or Rego input, with tested examples, a Rego file against an OPA server, and replaying history against a proposed policy with `policy simulate`
 - [Verifying a receipt](docs/verification.md): what each check means and what a verified receipt does and does not prove
 - [What the evidence satisfies](docs/compliance.md): the receipts, packs, and certificates mapped to SOC 2, ISO 27001, UK GDPR, the EU AI Act, FINRA, MAS, Colorado, DORA, the CSA AI Controls Matrix, the OWASP agentic guidance, and ISO/IEC 42001. Each regulation has a primary source, an "as of" date, and a list of what a receipt does not supply
 - [Anchoring the log on a chain](docs/anchoring.md): the log's checkpoints committed to Ethereum mainnet, or another EVM chain the installation picks, from a published address, what that proves and what it does not, running the anchor, and `log-check` against the chain
@@ -264,7 +264,9 @@ src/checkpoints.ts signed heads published on a schedule, to files and to Postgre
 src/log-store.ts   the log server's backends: the file, and Postgres with tenants, hashed tokens, one writer per tenant, rate limits
 src/log-sink.ts    where leaves go: the local file, or a remote log over HTTP; plus the reference log server
 src/policy.ts      Cedar evaluation wrapper, fail-closed
-src/simulate.ts    replay recorded policy decisions against a proposed Cedar policy, grouped changes and run digest
+src/policy-rego.ts Rego: compiled with opa build, evaluated in-process with the OPA WebAssembly SDK, fail-closed
+src/opa-server.ts  an OPA server's Data API as the policy, with bundle revisions as the digest
+src/simulate.ts    replay recorded policy decisions against a proposed Cedar or Rego policy, grouped changes and run digest
 src/delegation.ts  signed delegation grants
 src/approval.ts    exact-action human approvals, distinct trusted signatures, persistent single-use consumption
 src/receipt.ts     receipt and authorization statement types and provenance labels

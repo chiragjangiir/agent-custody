@@ -59,7 +59,7 @@ The container runs the same check, without `--connect`, each time it starts, and
 
 | path in the container | holds | mounted |
 | --- | --- | --- |
-| `/config` | `gateway.json`, `policy.cedar`, the principals' public keys | read-only, from your repository or a ConfigMap |
+| `/config` | `gateway.json`, `policy.cedar` (or `policy.rego`, which the image's `opa` compiles), the principals' public keys | read-only, from your repository or a ConfigMap |
 | `/data` | the gateway's key (created on first start), receipts, the local log, `revoked.json`, the operations store | a named volume or a persistent volume claim |
 | environment | the credentials the upstreams read (`headerEnv`, `tokenEnv` in `gateway.json`), the log's token | `.env`, a Secret |
 
@@ -72,7 +72,7 @@ For evidence a customer or auditor will accept, point `log` in `gateway.json` at
 | task | how |
 | --- | --- |
 | revoke a grant | `docker compose exec gateway agent-custody revoke --config /config/gateway.json --grant /path/in/container/grant.json`. The next call of every session under that grant, and every grant delegated from it, is refused; no restart. |
-| change the policy | save it through `agent-custody console`, or write `config/policy.cedar` by rename (write a temporary file, then `mv` it over). The gateway applies it from the next call with no restart, and records the change in `receipts/policy-reloads.jsonl`. A file that does not parse is refused and the old policy stays. |
+| change the policy | save it through `agent-custody console`, or write `config/policy.cedar` by rename (write a temporary file, then `mv` it over). The gateway applies it from the next call with no restart, and records the change in `receipts/policy-reloads.jsonl`. A file that does not parse is refused and the old policy stays. A `policy.rego` is applied and refused the same way; the console edits Cedar only. With `opa` in the config the policy lives on your OPA server instead. |
 | upgrade | set `AGENT_CUSTODY_GATEWAY_VERSION` and `docker compose pull && docker compose up -d`. |
 | stop | `docker compose stop`. The gateway closes on SIGTERM; `stop_grace_period` is 30 s. |
 | other commands | anything after the image name runs through the `agent-custody` CLI: `docker compose run --rm gateway verify ...`. |

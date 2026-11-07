@@ -15,6 +15,7 @@ import { decodeDelegation, delegationValidAt, grantDigest, verifyDelegation } fr
 import { writeRevokedGrants } from "./gateway.ts";
 import { CONSOLE_CSP, CONSOLE_HTML } from "./console-page.ts";
 import { hasPermitRule, policyDigest } from "./policy.ts";
+import { isRegoFile } from "./policy-rego.ts";
 import type { ReceiptBundle, ReceiptPredicate, ReceiptStatement } from "./receipt.ts";
 import { simulatePolicy } from "./simulate.ts";
 import { verifyBundle } from "./verify.ts";
@@ -49,6 +50,13 @@ class HttpError extends Error {
     super(message);
     this.status = status;
   }
+}
+
+/** The console edits Cedar files. A Rego file is edited where it lives, and an OPA server's policy in its bundles. */
+function cedarPolicyFile(cfg: GatewayConfig): string {
+  if (!cfg.policyFile) throw new HttpError(409, `this gateway asks the OPA server at ${cfg.opa?.url} for its decisions; edit the policy in the server's bundles`);
+  if (isRegoFile(cfg.policyFile)) throw new HttpError(409, `${basename(cfg.policyFile)} is a Rego policy; the console edits Cedar policies only, so edit it in place and the gateway compiles it on its next call`);
+  return cfg.policyFile;
 }
 
 const sha = (s: string) => createHash("sha256").update(s).digest();
@@ -298,9 +306,9 @@ export async function serveConsole(options: ConsoleOptions): Promise<RunningCons
     },
 
     "GET /api/policy": async () => {
-      const cfg = loadConfig(options.configFile);
-      const text = readFileSync(cfg.policyFile, "utf8");
-      return { path: cfg.policyFile, text, digest: policyDigest(text), history: readdirSync(join(state, "policy-history")).sort().reverse().slice(0, 20) };
+      const policyFile = cedarPolicyFile(loadConfig(options.configFile));
+      const text = readFileSync(policyFile, "utf8");
+      return { path: policyFile, text, digest: policyDigest(text), history: readdirSync(join(state, "policy-history")).sort().reverse().slice(0, 20) };
     },
 
     "POST /api/policy/validate": async (req) => {
@@ -360,16 +368,16 @@ export async function serveConsole(options: ConsoleOptions): Promise<RunningCons
       // from reading the digest to the rename, nothing else may save: two tabs that loaded the same digest would otherwise both pass the
       // check, the later rename would win, and the history of the lost edit would not even be the version it replaced
       return withPolicyLock(() => {
-        const cfg = loadConfig(options.configFile);
-        const current = readFileSync(cfg.policyFile, "utf8");
+        const policyFile = cedarPolicyFile(loadConfig(options.configFile));
+        const current = readFileSync(policyFile, "utf8");
         if (body.expectDigest !== policyDigest(current)) throw new HttpError(409, "the policy file changed since you loaded it; reload and try again");
         writeFileSync(join(state, "policy-history", `${new Date().toISOString().replace(/[:.]/g, "-")}-${policyDigest(current).slice(0, 12)}.cedar`), current);
         try {
-          atomicWrite(cfg.policyFile, text);
+          atomicWrite(policyFile, text);
         } catch (e) {
           throw new HttpError(500, `the policy file cannot be written (${e instanceof Error ? e.message : String(e)}); mount the config directory read-write for the console`);
         }
-        audit("policy.save", { file: cfg.policyFile, from: policyDigest(current), to: policyDigest(text), bytes: text.length, confirmed: issues }, by);
+        audit("policy.save", { file: policyFile, from: policyDigest(current), to: policyDigest(text), bytes: text.length, confirmed: issues }, by);
         return { digest: policyDigest(text), note: "saved; a running gateway applies it from its next call" };
       });
     },

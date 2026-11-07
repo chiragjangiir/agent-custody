@@ -53,6 +53,8 @@ export * from "./issue.ts";
 export * from "./log.ts";
 export * from "./log-sink.ts";
 export * from "./policy.ts";
+export * from "./policy-rego.ts";
+export * from "./opa-server.ts";
 export * from "./receipt.ts";
 export * from "./verify.ts";
 export * from "./sdk/index.ts";

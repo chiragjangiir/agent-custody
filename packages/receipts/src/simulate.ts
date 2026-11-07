@@ -6,6 +6,7 @@ import { canonicalize, dsseVerify, type PublicKeyRef } from "./crypto.ts";
 import { decodeDelegation, DELEGATION_TYPE, delegationValidAt } from "./delegation.ts";
 import { leafHash, verifyInclusion } from "./log.ts";
 import { evaluate, policyDigest, type PolicyDecision } from "./policy.ts";
+import { compileRego, evaluateRego } from "./policy-rego.ts";
 import { AUTHORIZATION_PREDICATE_TYPE, RECEIPT_TYPE, TREEHEAD_TYPE, type AuthorizationBundle, type AuthorizationStatement, type ReceiptPredicate, type TreeHead } from "./receipt.ts";
 import { structuralProblem } from "./verify.ts";
 
@@ -54,6 +55,8 @@ export interface SimulationOptions {
   disclosures?: ReadonlyMap<string, unknown>;
   /** Calls that have no receipt to replay. Each counts in `total` and is reported as skipped. */
   unreplayable?: SimulationSkip[];
+  /** The proposed policy's language. Rego is compiled once with the opa binary on PATH. Default cedar. */
+  language?: "cedar" | "rego";
 }
 
 const strings = (v: unknown): v is string[] => Array.isArray(v) && v.every((x) => typeof x === "string");
@@ -100,7 +103,7 @@ export function verifyOrphanAuthorization(bundle: AuthorizationBundle, issuerKey
 }
 
 /**
- * Compare a proposed Cedar policy with recorded policy decisions, using each receipt's original arguments, fact
+ * Compare a proposed Cedar or Rego policy with recorded policy decisions, using each receipt's original arguments, fact
  * values, agent, and (for gateways) grant context. Observe-mode decisions are the baseline even when the call ran.
  * Receipts are not signature-verified here; verify their bundles separately when their authenticity matters. A
  * reconciliation receipt is trusted as a provider read only after `verifyBundle` accepts it: the library checks no more
@@ -111,8 +114,12 @@ export function verifyOrphanAuthorization(bundle: AuthorizationBundle, issuerKey
  * The receipts are read once, one at a time, so a caller can verify and parse a large history lazily.
  */
 export function simulatePolicy(policyText: string, receipts: Iterable<ReceiptPredicate>, options: SimulationOptions = {}): SimulationReport {
-  const parsed = cedar.checkParsePolicySet({ staticPolicies: policyText });
-  if (parsed.type === "failure") throw new Error(`invalid Cedar policy: ${parsed.errors.map((e) => e.message).join("; ")}`);
+  const rego = options.language === "rego" ? compileRego(policyText) : undefined;
+  if (rego && !rego.policy) throw new Error(`invalid Rego policy: ${rego.errors.join("; ")}`);
+  if (!rego) {
+    const parsed = cedar.checkParsePolicySet({ staticPolicies: policyText });
+    if (parsed.type === "failure") throw new Error(`invalid Cedar policy: ${parsed.errors.map((e) => e.message).join("; ")}`);
+  }
   const unreplayable = options.unreplayable ?? [];
   const report: SimulationReport = {
     runId: randomUUID(),
@@ -191,7 +198,8 @@ export function simulatePolicy(policyText: string, receipts: Iterable<ReceiptPre
     }
     let proposed: PolicyDecision;
     try {
-      proposed = evaluate(policyText, { agentId: p.agent.id, tool, context });
+      const request = { agentId: p.agent.id, tool, context };
+      proposed = rego?.policy ? evaluateRego(rego.policy, report.policyDigest, request) : evaluate(policyText, request);
     } catch (e) {
       // An evaluator exception is a deny, just as at the gateway; it must never become an allow in a replay.
       proposed = { decision: "deny", reasons: [], errors: [e instanceof Error ? e.message : String(e)], policyDigest: report.policyDigest };

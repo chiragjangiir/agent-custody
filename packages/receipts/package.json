@@ -2,7 +2,7 @@
   "name": "@agent-custody/receipts",
   "version": "0.14.0",
   "mcpName": "io.github.svayatta/agent-custody",
-  "description": "Chain of custody for AI agents: signed, independently verifiable receipts for tool calls. MCP gateway + Cedar policy + Merkle transparency log",
+  "description": "Chain of custody for AI agents: signed, independently verifiable receipts for tool calls. MCP gateway + Cedar or Rego policy + Merkle transparency log",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
@@ -73,6 +73,7 @@
   "dependencies": {
     "@cedar-policy/cedar-wasm": "4.12.0",
     "@modelcontextprotocol/sdk": "1.30.0",
+    "@open-policy-agent/opa-wasm": "1.10.0",
     "zod": "4.5.4"
   },
   "devDependencies": {

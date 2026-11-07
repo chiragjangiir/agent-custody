@@ -158,7 +158,17 @@ export const GatewayConfigSchema = z.object({
   /** the one grant a stdio gateway serves; over HTTP each connection presents its own, and this is not needed */
   grantFile: z.string().optional(),
   trustedPrincipalKeys: z.array(z.string()).min(1),
-  policyFile: z.string(),
+  /** the policy file: Cedar, or Rego when it ends in .rego (compiled with the opa binary on PATH when it loads) */
+  policyFile: z.string().optional(),
+  /** an OPA server that decides each call instead of a local file; its package defines allow and deny, as a .rego file does */
+  opa: z.object({
+    url: z.string().url(),
+    /** the package path under /v1/data whose allow and deny rules decide; default agentcustody */
+    decision: z.string().min(1).regex(/^[A-Za-z_][A-Za-z0-9_]*([./][A-Za-z_][A-Za-z0-9_]*)*$/, "a package path such as agentcustody or authz/agents").optional(),
+    tokenEnv: z.string().min(1).optional(),
+    /** milliseconds one decision may take before the call is denied; default 2000 */
+    timeoutMs: z.number().int().positive().optional(),
+  }).optional(),
   facts: z.array(FactSchema).default([]),
   /**
    * Consequential tools, by name or "*" for all: before forwarding one of these, the gateway commits a signed
@@ -196,6 +206,7 @@ export const GatewayConfigSchema = z.object({
   otel: OtelSchema.optional(),
   splunk: SplunkSchema.optional(),
 }).refine(hasOneLog, oneLog).refine((c) => (c.upstream ? 1 : 0) + (c.upstreams ? 1 : 0) === 1, { message: "exactly one of upstream or upstreams is required" })
+  .refine((c) => (c.policyFile ? 1 : 0) + (c.opa ? 1 : 0) === 1, { message: "exactly one of policyFile or opa is required" })
   // a key fetched from the log itself proves nothing about a log that is dishonest from the start, so a remote log that
   // gates consequential calls must have its keys pinned in the config (issue #99)
   .refine((c) => !c.log || (!c.precommit.length && !c.operations) || !!c.log.keys?.length, { message: "precommit with a remote log needs log.keys: the log's public key files, pinned, to check its answer before a consequential call is forwarded" })
@@ -215,7 +226,7 @@ export function loadConfig(path: string): GatewayConfig {
     identity: { keyFile: r(cfg.identity.keyFile) },
     ...(cfg.grantFile ? { grantFile: r(cfg.grantFile) } : {}),
     trustedPrincipalKeys: cfg.trustedPrincipalKeys.map(r),
-    policyFile: r(cfg.policyFile),
+    ...(cfg.policyFile ? { policyFile: r(cfg.policyFile) } : {}),
     receiptsDir: r(cfg.receiptsDir),
     ...(cfg.logFile ? { logFile: r(cfg.logFile) } : {}),
     ...(cfg.log?.keys ? { log: { ...cfg.log, keys: cfg.log.keys.map(r) } } : {}),
@@ -230,7 +241,7 @@ export const SdkConfigSchema = z.object({
   agentId: z.string().min(1),
   principalId: z.string().min(1).optional(),
   identity: z.object({ keyFile: z.string() }),
-  /** optional Cedar policy; when present, wrapped tools and PreToolUse hooks can deny */
+  /** optional policy, Cedar or Rego (.rego); when present, wrapped tools and PreToolUse hooks can deny */
   policyFile: z.string().optional(),
   /** "observe" records the policy's decision with `enforced: false` and never blocks; "enforce" (default) blocks a deny */
   mode: z.enum(["enforce", "observe"]).optional(),

@@ -10,6 +10,8 @@ import { GatewayConfigSchema, loadConfig, strictRefusals, type GatewayConfig } f
 import { generateKeyPair, loadPrivateKey, loadPublicKey, writeKeyPair, type Envelope, type PublicKeyRef } from "./crypto.ts";
 import { delegationValidAt, verifyDelegation } from "./delegation.ts";
 import { hasPermitRule } from "./policy.ts";
+import { compileRego, isRegoFile } from "./policy-rego.ts";
+import { createOpaServerPolicy } from "./opa-server.ts";
 import { createGatewayHost } from "./gateway.ts";
 
 export interface CheckFinding {
@@ -119,9 +121,22 @@ export async function checkConfig(configPath: string, options: CheckOptions = {}
   }
   if (principals.length === cfg.trustedPrincipalKeys.length) add("ok", "principal keys", `${principals.length} trusted principal key${principals.length === 1 ? "" : "s"} load`);
 
-  // the policy
-  if (!existsSync(cfg.policyFile)) {
+  // the policy: an OPA server answers for its package, a Rego file compiles, a Cedar file parses
+  if (cfg.opa) {
+    let bundles: Record<string, string> = {};
+    try {
+      await createOpaServerPolicy(cfg.opa, (p) => { if (p.bundles) bundles = p.bundles; }).probe();
+      add("ok", "policy", `the OPA server at ${cfg.opa.url} answers for data.${(cfg.opa.decision ?? "agentcustody").replaceAll("/", ".")}`);
+      if (!Object.keys(bundles).length) add("warn", "policy", "the OPA server reports no bundle revision, so receipts cannot name the policy that decided; serve the policy from a bundle with a revision");
+    } catch (e) {
+      add("error", "policy", e instanceof Error ? e.message : String(e));
+    }
+  } else if (!cfg.policyFile || !existsSync(cfg.policyFile)) {
     add("error", "policy", `${cfg.policyFile} does not exist`);
+  } else if (isRegoFile(cfg.policyFile)) {
+    const errors = compileRego(readFileSync(cfg.policyFile, "utf8")).errors;
+    for (const e of errors) add("error", "policy", `${cfg.policyFile}: ${e}`);
+    if (!errors.length) add("ok", "policy", "the Rego policy compiles");
   } else {
     const text = readFileSync(cfg.policyFile, "utf8");
     const r = cedar.checkParsePolicySet({ staticPolicies: text });
@@ -143,6 +158,7 @@ export async function checkConfig(configPath: string, options: CheckOptions = {}
   if (cfg.splunk?.tokenEnv) envNames.push(["splunk", cfg.splunk.tokenEnv]);
   for (const v of Object.values(cfg.otel?.headersEnv ?? {})) envNames.push(["otel", v]);
   if (cfg.captureKeyEnv) envNames.push(["capture", cfg.captureKeyEnv]);
+  if (cfg.opa?.tokenEnv) envNames.push(["opa", cfg.opa.tokenEnv]);
   const skipEnvironment = options.environment === "skip";
   const missing = skipEnvironment ? [] : envNames.filter(([, v]) => !process.env[v]);
   for (const [who, v] of missing) add("error", "environment", `${who}: the variable ${v} is not set here, and a gateway does not start without it`);

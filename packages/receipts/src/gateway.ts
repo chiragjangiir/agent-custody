@@ -21,6 +21,8 @@ import { restUpstream, type UpstreamClient } from "./rest.ts";
 import { a2aUpstream } from "./a2a.ts";
 import { captureKeyFrom, effectiveRule } from "./capture.ts";
 import { evaluate, hasPermitRule, policyDigest, policyParseErrors, type PolicyDecision } from "./policy.ts";
+import { compileRego, evaluateRego, isRegoFile, type RegoPolicy } from "./policy-rego.ts";
+import { createOpaServerPolicy } from "./opa-server.ts";
 import type { ApprovalRecord, AuthorizationBundle, AuthorizationPredicate, FactRecord, OperationEvidence, ReceiptBundle, ReceiptPredicate, ReceiptStatement } from "./receipt.ts";
 import { OPERATION_META_KEY, OperationStore, ownerAlive, type OperationRecord, type OperationStatus } from "./operations.ts";
 
@@ -157,18 +159,32 @@ export async function createGatewayHost(cfg: GatewayConfig, options: GatewayOpti
   const trusted = cfg.trustedPrincipalKeys.map(loadPublicKey);
   const approvalKeys = cfg.approvals?.trustedKeys.map(loadPublicKey) ?? [];
   const approvalRule = (tool: string) => cfg.approvals?.tools.find((rule) => rule.tool === tool) ?? cfg.approvals?.tools.find((rule) => rule.tool === "*");
-  // The Cedar policy, re-read whenever the file changes, like the revocation list. A call is evaluated under the policy
-  // in force when it starts, and its receipt names that policy's digest. A changed file that cannot be read or does not
-  // parse is refused and the policy in force stays: never an allow, and never a fall back to no policy. Every change
-  // and every refusal is printed and appended to receiptsDir/policy-reloads.jsonl with both digests and the time.
+  // The policy file, Cedar or Rego, re-read whenever the file changes, like the revocation list. A Rego file is compiled
+  // with the opa binary each time it changes, and a compile failure is refused like a Cedar file that does not parse.
+  // A call is evaluated under the policy in force when it starts, and its receipt names that policy's digest. A changed
+  // file that cannot be read or does not parse is refused and the policy in force stays: never an allow, and never a
+  // fall back to no policy. Every change and every refusal is printed and appended to receiptsDir/policy-reloads.jsonl
+  // with both digests and the time.
   // The bytes and the metadata come from one open file, so a rename between reading and stat'ing cannot pair them wrongly.
   // ctime is in the key because a program can set mtime back but not ctime, and every write moves it. A file written in
   // the last two seconds may still be being written within one timestamp tick, so its key is not kept: it is re-read on
   // each call until it settles, and a half-written file read meanwhile is replaced by the finished one.
   const keyOf = (st: { dev: number; ino: number; mtimeMs: number; ctimeMs: number; size: number }) => `${st.dev}:${st.ino}:${st.mtimeMs}:${st.ctimeMs}:${st.size}`;
   const settled = (st: { mtimeMs: number; ctimeMs: number }) => Date.now() - Math.max(st.mtimeMs, st.ctimeMs) >= 2000;
+  const policyFile = cfg.policyFile ?? "";
+  const rego = isRegoFile(policyFile);
+  type Policy = { text: string; digest: string; rego?: RegoPolicy };
+  const loadPolicy = (text: string): { policy: Policy; errors: [] } | { policy?: undefined; errors: string[] } => {
+    const digest = policyDigest(text);
+    if (!rego) {
+      const errors = policyParseErrors(text);
+      return errors.length ? { errors } : { policy: { text, digest }, errors: [] };
+    }
+    const compiled = compileRego(text);
+    return compiled.policy ? { policy: { text, digest, rego: compiled.policy }, errors: [] } : { errors: compiled.errors };
+  };
   const readPolicy = () => {
-    const fd = openSync(cfg.policyFile, "r");
+    const fd = openSync(policyFile, "r");
     try {
       const st = fstatSync(fd);
       const text = readFileSync(fd, "utf8");
@@ -177,9 +193,16 @@ export async function createGatewayHost(cfg: GatewayConfig, options: GatewayOpti
       closeSync(fd);
     }
   };
-  const policyStat = () => keyOf(statSync(cfg.policyFile));
-  const initialPolicy = readPolicy();
-  let policyNow = { text: initialPolicy.text, digest: policyDigest(initialPolicy.text) };
+  const policyStat = () => keyOf(statSync(policyFile));
+  const initialPolicy = cfg.policyFile ? readPolicy() : { text: "", seen: "" };
+  let policyNow: Policy = { text: initialPolicy.text, digest: policyDigest(initialPolicy.text) };
+  // A Cedar file that does not parse at start denies every call with the parse errors. A Rego file must compile: with
+  // no wasm module there is nothing to evaluate, so the gateway does not start.
+  if (rego) {
+    const loaded = loadPolicy(initialPolicy.text);
+    if (!loaded.policy) throw new Error(`agent-custody gateway: ${policyFile} does not compile: ${loaded.errors.join("; ")}`);
+    policyNow = loaded.policy;
+  }
   let policySeen = initialPolicy.seen;
   // A file that cannot be read is retried on every call, since restoring access changes none of its metadata; this
   // keeps the refusal from being printed and recorded on each of those calls.
@@ -190,16 +213,26 @@ export async function createGatewayHost(cfg: GatewayConfig, options: GatewayOpti
   const recordReload = (entry: Record<string, unknown>) => {
     try {
       mkdirSync(cfg.receiptsDir, { recursive: true });
-      appendFileSync(policyReloads, JSON.stringify({ at: new Date().toISOString(), file: cfg.policyFile, ...entry }) + "\n");
+      appendFileSync(policyReloads, JSON.stringify({ at: new Date().toISOString(), ...(cfg.opa ? { opa: cfg.opa.url } : { file: policyFile }), ...entry }) + "\n");
     } catch (e) {
       console.error(`agent-custody gateway: cannot record the policy change in ${policyReloads}: ${e instanceof Error ? e.message : String(e)}`);
     }
   };
   const refuseReload = (to: string | null, errors: string[]) => {
-    console.error(`agent-custody gateway: POLICY NOT RELOADED: ${cfg.policyFile} ${errors.join("; ")}; policy ${policyNow.digest} stays in force`);
+    console.error(`agent-custody gateway: POLICY NOT RELOADED: ${policyFile} ${errors.join("; ")}; policy ${policyNow.digest} stays in force`);
     recordReload({ event: "refused", from: policyNow.digest, to, errors });
   };
-  const currentPolicy = (): { text: string; digest: string } => {
+  // An OPA server holds the policy itself. Every new provenance it reports is printed and recorded beside file reloads,
+  // so each digest a receipt carries maps to the bundle revisions that decided it.
+  const opaServer = cfg.opa ? createOpaServerPolicy(cfg.opa, (p) => {
+    const warnings = p.bundles === null ? ["the OPA server did not answer: the calls it left undecided are denied under this digest"]
+      : Object.keys(p.bundles).length ? [] : ["the OPA server reports no bundle revision, so receipts cannot name the policy that decided"];
+    console.error(`agent-custody gateway: OPA policy ${p.digest} at ${p.decision}: ${JSON.stringify(p.bundles)}${warnings.length ? `; WARNING: ${warnings.join("; ")}` : ""}`);
+    recordReload({ event: "opa-provenance", to: p.digest, decision: p.decision, bundles: p.bundles, ...(warnings.length ? { warnings } : {}) });
+  }) : undefined;
+  if (opaServer) await opaServer.probe();
+  const currentPolicy = (): Policy => {
+    if (opaServer) return { text: "", digest: opaServer.digest() };
     const unreadable = (seen: string, e: unknown) => {
       if (unreadableSeen !== seen) refuseReload(null, [`cannot be read (${e instanceof Error ? e.message : String(e)})`]);
       unreadableSeen = seen;
@@ -224,18 +257,18 @@ export async function createGatewayHost(cfg: GatewayConfig, options: GatewayOpti
     const digest = policyDigest(text);
     if (digest === policyNow.digest) return policyNow;
     if (digest === refusedDigest) return policyNow;
-    const errors = policyParseErrors(text);
-    if (errors.length > 0) {
+    const loaded = loadPolicy(text);
+    if (!loaded.policy) {
       refusedDigest = digest;
-      refuseReload(digest, [`does not parse: ${errors.join("; ")}`]);
+      refuseReload(digest, [`does not ${rego ? "compile" : "parse"}: ${loaded.errors.join("; ")}`]);
       return policyNow;
     }
     refusedDigest = "";
     // a policy with no permit rule parses and denies every call: fail-closed, but never a reload to pass over quietly
-    const warnings = hasPermitRule(text) ? [] : ["no permit rule: every call is denied"];
-    console.error(`agent-custody gateway: policy reloaded from ${cfg.policyFile}: ${policyNow.digest} -> ${digest}${warnings.length ? `; WARNING: ${warnings.join("; ")}` : ""}`);
+    const warnings = rego || hasPermitRule(text) ? [] : ["no permit rule: every call is denied"];
+    console.error(`agent-custody gateway: policy reloaded from ${policyFile}: ${policyNow.digest} -> ${digest}${warnings.length ? `; WARNING: ${warnings.join("; ")}` : ""}`);
     recordReload({ event: "reloaded", from: policyNow.digest, to: digest, ...(warnings.length ? { warnings } : {}) });
-    policyNow = { text, digest };
+    policyNow = loaded.policy;
     return policyNow;
   };
   // Private evidence: the key that encrypts withheld fields, read once; a rule in mode encrypted without it is a config error.
@@ -437,7 +470,7 @@ export async function createGatewayHost(cfg: GatewayConfig, options: GatewayOpti
 
     async function handleCall(params: CallParams): Promise<CallToolResult> {
       const tool = params.name;
-      const { text: policyText, digest: pDigest } = currentPolicy();
+      const { text: policyText, digest: pDigest, rego: regoPolicy } = currentPolicy();
       // An embedding caller can mutate its objects while a lookup or log append is awaited. Snapshot the call and
       // approval before the first await, so the approved bytes are the bytes evaluated, logged, and forwarded. A caller
       // also cannot change the payment after its reservation was bound.
@@ -500,11 +533,8 @@ export async function createGatewayHost(cfg: GatewayConfig, options: GatewayOpti
         try {
           ({ facts, templates: factTemplates, results: factResults } = await gatherFacts(tool, args, upstreamMeta));
           const factValues = Object.fromEntries(Object.entries(facts).map(([k, f]) => [k, f.value]));
-          policy = evaluate(policyText, {
-            agentId: delegation.agent,
-            tool,
-            context: { args, facts: factValues, grant: { principal: delegation.principal, scopes: delegation.scopes } },
-          });
+          const request = { agentId: delegation.agent, tool, context: { args, facts: factValues, grant: { principal: delegation.principal, scopes: delegation.scopes } } };
+          policy = opaServer ? await opaServer.decide(request) : regoPolicy ? evaluateRego(regoPolicy, pDigest, request) : evaluate(policyText, request);
         } catch (e) {
           policy = { decision: "deny", reasons: [], errors: [String(e instanceof Error ? e.message : e)], policyDigest: pDigest };
         }

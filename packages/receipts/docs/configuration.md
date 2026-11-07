@@ -1,6 +1,6 @@
 # Configuring the gateway
 
-Who may use which tools, and where those tools live, is set in three files and a few environment variables. This page is the map: what each one decides, how they fit together, a worked example with two agents on one shared gateway, how it all works in the Docker image, and how to check a config before you start. The full list of config keys is in [the gateway reference](/reference/gateway); the Cedar language is in [policies.md](policies.md).
+Who may use which tools, and where those tools live, is set in three files and a few environment variables. This page is the map: what each one decides, how they fit together, a worked example with two agents on one shared gateway, how it all works in the Docker image, and how to check a config before you start. The full list of config keys is in [the gateway reference](/reference/gateway); the Cedar and Rego languages are in [policies.md](policies.md).
 
 ## What you configure, and where
 
@@ -22,7 +22,7 @@ For each call, in this order, and a refusal at any step is a signed receipt:
 1. **The grant** is valid, signed by a trusted principal, inside its window, and not revoked.
 2. **The tool** is one of the grant's scopes.
 3. **Facts** the policy needs are fetched by the gateway from an upstream (`facts` in the config).
-4. **The Cedar policy** permits the call. No matching `permit` means deny.
+4. **The policy** permits the call: Cedar, a Rego file, or an OPA server ([policies.md](policies.md#rego)). Nothing permitting it means deny.
 5. **For `precommit` tools**, the authorization is committed to the log before anything is forwarded.
 6. **The call** is forwarded to the upstream that owns the tool.
 
@@ -197,7 +197,7 @@ docker run --rm -v "$PWD/config:/config:ro" -v gateway-data:/data --env-file .en
 | a key that is not in the schema (a typo such as `precomit` is otherwise silently ignored, and the setting stays at its default) | **error**, with the key it nearly is |
 | the gateway key loads, and is not readable by other users | error, and a warning |
 | every trusted principal key loads | error |
-| the Cedar policy parses, and has at least one `permit` rule (a `permit(` in a comment does not count) | error, and a warning |
+| the Cedar policy parses, and has at least one `permit` rule (a `permit(` in a comment does not count); a `.rego` file compiles; an OPA server answers for the package, and reports a bundle revision | error, and a warning |
 | every credential variable the config names is set: upstream tokens and headers, the log's token, the capture key, the Splunk token, and the OpenTelemetry headers | **error**: the gateway does not start without it |
 | a stdio `command` exists, and a script argument exists | error, and a warning |
 | the receipts, log, revocation, operations database, and approvals paths can be written, and the revocation file is a JSON array | error |

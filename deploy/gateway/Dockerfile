@@ -1,9 +1,14 @@
 # The shared gateway as a container: `agent-custody gateway --http` on Node, one session per grant, for every agent
 # on the host or cluster that points at it. Built two ways from the same file: a release installs the published npm
 # package of AGENT_CUSTODY_VERSION; a build from main puts a tarball of the workspace package in pkg/ and installs
-# that. Mounts: /config (read-only: gateway.json, policy.cedar, the principals' public keys) and /data (the gateway
-# key, receipts, the local log, the revocation file).
+# that. Mounts: /config (read-only: gateway.json, policy.cedar or policy.rego, the principals' public keys) and /data (the gateway
+# key, receipts, the local log, the revocation file). The opa binary is copied in from the official static image so a
+# policy.rego compiles when the gateway loads it; Cedar policies and OPA servers do not use it.
+FROM openpolicyagent/opa:1.22.0-static@sha256:906bfc9904b2693733e7959d71773dd073e6c135cf06f26d955abe94603e82b3 AS opa
+
 FROM node:24-alpine@sha256:06d7adf3e0ef61a13f1d28682726366f97a15aa1888c934d3ecec86c33918b53
+
+COPY --from=opa /opa /usr/local/bin/opa
 
 ARG AGENT_CUSTODY_VERSION
 COPY pkg/ /tmp/pkg/
