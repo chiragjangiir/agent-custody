@@ -236,6 +236,73 @@ export function loadConfig(path: string): GatewayConfig {
   };
 }
 
+/** One route of the door: a name the policy sees as the action, and what arrives there. `path` is exact, a prefix when it ends in `/*`, or `*` for anything. The first route that matches wins. */
+const DoorRouteSchema = z.object({
+  name: z.string().min(1),
+  /** methods this route covers; default every method */
+  methods: z.array(z.enum(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])).min(1).optional(),
+  path: z.string().min(1).regex(/^(\*|\/[^*]*(\/\*)?)$/, "a path is exact (/refunds), a prefix (/api/*), or *"),
+});
+export type DoorRouteConfig = z.infer<typeof DoorRouteSchema>;
+
+/**
+ * The door: a reverse proxy in front of a business's own website, API, or forms. Every arrival is classified (verified,
+ * claimed, or unknown), decided by the Cedar policy per route, forwarded to the origin or refused, and receipted either
+ * way. The origin's credentials, if any, come from the environment through headerEnv, never from the file or the caller.
+ */
+export const DoorConfigSchema = z.object({
+  identity: z.object({ keyFile: z.string() }),
+  /** where allowed requests go: the site or API the door stands in front of */
+  origin: z.object({
+    url: z.string().url(),
+    headers: z.record(z.string(), z.string()).optional(),
+    headerEnv: z.record(z.string(), z.string().min(1)).optional(),
+    timeoutMs: z.number().int().positive().default(30_000),
+  }),
+  routes: z.array(DoorRouteSchema).default([]),
+  /** the action name for an arrival no route matches; default "other" */
+  unmatchedRoute: z.string().min(1).default("other"),
+  /** principal keys whose grants the door accepts as a passport: an arrival carrying one of their grants, in scope for its route, is `verified` */
+  trustedPrincipalKeys: z.array(z.string()).default([]),
+  policyFile: z.string(),
+  /** "enforce" (default) refuses what the policy denies; "observe" forwards everything and records the decision with `enforced: false` */
+  mode: z.enum(["enforce", "observe"]).optional(),
+  /** behind a reverse proxy you run: the arrival's address is the last in X-Forwarded-For, the one that proxy appended, and the client-address headers are relayed as it sent them */
+  trustProxy: z.boolean().optional(),
+  /** the largest request body the door relays; a larger one is refused with 413 and receipted. Default 1 MiB */
+  maxBodyBytes: z.number().int().positive().default(1024 * 1024),
+  /** the largest origin response the door relays; a larger one is recorded by size and the client gets 502. Default 32 MiB */
+  maxResponseBytes: z.number().int().positive().default(32 * 1024 * 1024),
+  /** arrivals handled at once; past this the next is answered 503 before its body is read, and not receipted. Default 256 */
+  maxInFlight: z.number().int().positive().default(256),
+  /** routes whose arrivals are committed to the log before they are relayed whatever the method, or ["*"]; every arrival whose method is not GET, HEAD, or OPTIONS is committed regardless */
+  precommit: z.array(z.string().min(1)).default([]),
+  receiptsDir: z.string(),
+  logFile: z.string().optional(),
+  log: LogSchema.optional(),
+  otel: OtelSchema.optional(),
+  splunk: SplunkSchema.optional(),
+  capture: CaptureSchema.optional(),
+  captureKeyEnv: z.string().min(1).optional(),
+}).refine(hasOneLog, oneLog).refine((c) => new Set(c.routes.map((r) => r.name)).size === c.routes.length, { message: "route names must be unique" })
+  .refine((c) => !c.log || !!c.log.keys?.length, { message: "a remote log needs log.keys: the log's public key files, pinned, to check its answer before a request is relayed" });
+export type DoorConfig = z.infer<typeof DoorConfigSchema>;
+
+export function loadDoorConfig(path: string): DoorConfig {
+  const cfg = DoorConfigSchema.parse(JSON.parse(readFileSync(path, "utf8")));
+  const base = dirname(resolve(path));
+  const r = (p: string) => resolve(base, p);
+  return {
+    ...cfg,
+    identity: { keyFile: r(cfg.identity.keyFile) },
+    trustedPrincipalKeys: cfg.trustedPrincipalKeys.map(r),
+    policyFile: r(cfg.policyFile),
+    receiptsDir: r(cfg.receiptsDir),
+    ...(cfg.logFile ? { logFile: r(cfg.logFile) } : {}),
+    ...(cfg.log?.keys ? { log: { ...cfg.log, keys: cfg.log.keys.map(r) } } : {}),
+  };
+}
+
 export const SdkConfigSchema = z.object({
   /** identity the receipts will name; nothing checks it, so it is recorded as claimed */
   agentId: z.string().min(1),

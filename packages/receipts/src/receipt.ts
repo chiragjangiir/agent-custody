@@ -25,8 +25,10 @@ export type Provenance = "attested" | "observed" | "claimed";
  * Who produced the receipt. This is the first thing a verifier should read.
  *  - gateway: an out-of-process enforcement point; the agent could neither skip nor forge it
  *  - sdk:     an interceptor inside the agent's own process; self-reported, tamper-evident after issue but not before
+ *  - door:    an out-of-process enforcement point in front of a business's own HTTP surface; the arriving agent, caller,
+ *             or browser could neither skip nor forge it, and has no grant unless it presented one
  */
-export type IssuerKind = "gateway" | "sdk";
+export type IssuerKind = "gateway" | "sdk" | "door";
 
 export interface FactRecord {
   tool: string;

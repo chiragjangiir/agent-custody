@@ -19,7 +19,7 @@ const decide = (i: number, r: ReturnType<typeof req>) => evaluate(blocks[i]!, r)
 
 describe("docs/policies.md examples", () => {
   it("contains the expected number of examples", () => {
-    expect(blocks.length).toBe(16);
+    expect(blocks.length).toBe(17);
   });
 
   it("every block parses as a Cedar policy set", () => {
@@ -124,6 +124,19 @@ describe("docs/policies.md examples", () => {
   it("8: grant is reachable from context", () => {
     expect(decide(8, req("stripe.refund", {}))).toBe("allow");
     expect(evaluate(blocks[8]!, { ...req("stripe.refund", {}), context: { args: {}, facts: {}, grant: { ...grant, principal: "someone-else" } } }).decision).toBe("deny");
+  });
+
+  it("16: the door: the catalogue is open to anyone, a refund needs a verified arrival and a small amount", () => {
+    const arrival = (cls: string) => ({ arrival: { class: cls, subject: cls === "verified" ? "shopping-agent" : "unknown", grant: cls === "verified" ? "verified" : "absent", signature: false, remote: "127.0.0.1", method: "POST", path: "/refunds", route: "refund" } });
+    const door = (route: string, args: Record<string, unknown>, cls: string) => ({ agentId: cls === "verified" ? "shopping-agent" : "unknown", tool: route, context: { args, facts: arrival(cls), ...(cls === "verified" ? { grant: { principal: "shop-owner", scopes: ["refund"] } } : {}) } });
+    expect(evaluate(blocks[16]!, door("catalogue", { method: "GET", path: "/catalogue/shoes" }, "unknown")).decision).toBe("allow");
+    expect(evaluate(blocks[16]!, door("refund", { method: "POST", path: "/refunds", body: { amount: 1000 } }, "unknown")).decision).toBe("deny");
+    expect(evaluate(blocks[16]!, door("refund", { method: "POST", path: "/refunds", body: { amount: 4500 } }, "verified")).decision).toBe("allow");
+    expect(evaluate(blocks[16]!, door("refund", { method: "POST", path: "/refunds", body: { amount: 9000 } }, "verified")).decision).toBe("deny");
+    expect(evaluate(blocks[16]!, door("refund", { method: "POST", path: "/refunds", body: { amount: -1 } }, "verified")).decision).toBe("deny");
+    expect(evaluate(blocks[16]!, door("refund", { method: "POST", path: "/refunds", body: { amount: 0 } }, "verified")).decision).toBe("deny");
+    // no JSON body at all: the amount comparison errors, and an error is a deny
+    expect(evaluate(blocks[16]!, door("refund", { method: "POST", path: "/refunds" }, "verified")).decision).toBe("deny");
   });
 
   it("the Rego example compiles and keeps the promises its prose makes", () => {

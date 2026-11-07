@@ -330,3 +330,20 @@ The report lists every call whose `allow` or `deny` decision changes, grouped by
 Every run records a `runId`, `timestamp`, the proposed text's sha256 as `policyDigest`, and the original digests as `previousPolicyDigests`. `--out` saves the full JSON report, and `--json` prints it to stdout. Changes alone exit 0. A report that cannot replay every call says `INCOMPLETE` and exits 1: `skipped` names each receipt and why. This includes record-only receipts with no policy baseline, withheld arguments or fact values, calls whose receipt is missing, and calls stopped before Cedar could evaluate. Grant failures cannot become permits through a policy change, and neither can an approval refusal: the gateway checks the approval before Cedar runs, so the call is skipped as a non-policy gate. The approval record says so even under a private rule. Withheld results alone do not prevent replay. A reconciliation receipt is a provider read, so no policy decision exists to replay. The report counts it in `reconciliations`, not in `evaluated` or `skipped`, and it does not make the report incomplete. A reconciliation whose original receipt is missing is the exception: the call that it settles cannot be replayed, so the report skips that call and says `INCOMPLETE`. The library trusts a reconciliation receipt only after `verifyBundle` accepts it; the CLI and the console verify first.
 
 The report is an analysis of the supplied receipt directory; it does not prove that the directory contains the whole history. Keep the report beside the proposed policy and review the changed receipt ids before switching from observe mode to enforcement. [Tutorial 28](../examples/28-policy-simulation.ts) records three refunds, stops the gateway, and replays them against a lower limit.
+
+## How an arrival at the door becomes a Cedar request
+
+The [door](door.md) uses the same evaluator for arrivals at your own HTTP surface. `principal` is `Agent::"<agent>"` for the agent a verified grant names, and `Agent::"unknown"` for every other arrival: a declared name is a claim and stays in the arrival fact. `action` and `resource` are the route the arrival fell under. `context.args` is the request (`method`, `path`, `query`, `headers`, a JSON `body` when small, `bodyBytes`, `bodyDigest`; `bodyOversized: true` and no digest when the body passed `maxBodyBytes`), claimed. The policy reads it with `null` members dropped and numbers that are not safe integers as strings, since Cedar refuses both. `context.facts.arrival` is the door's own observation of the arrival: its `class` (`verified`, `claimed`, `unknown`), `subject`, what became of its `grant`, and its `remote` address. `context.grant` is present only for a verified arrival. A policy that lets `unknown` through on a route lets everything through on that route.
+
+```cedar
+permit(principal, action == Action::"catalogue", resource);
+
+permit(principal, action == Action::"refund", resource)
+when {
+  context.facts.arrival.class == "verified" &&
+  context.args.body.amount > 0 &&
+  context.args.body.amount <= 5000
+};
+```
+
+A bound on an amount needs both ends: `amount <= 5000` alone lets a negative refund through, and the door relays the body as it came. A permit that names an agent, `principal == Agent::"shopping-agent"`, is satisfied only by a verified grant for that agent: a declared name never reaches the principal slot. `agent-custody check` still warns on a permit that names an agent without requiring `context.facts.arrival.class == "verified"`, because a policy copied from the gateway reads as if it did.

@@ -7,26 +7,26 @@
       "description": "The tree head from the first remote receipt and the log's later head, with the proof the log served.",
       "older": {
         "payloadType": "application/vnd.agent-custody.treehead+json",
-        "payload": "eyJsb2ciOiJ2ZWN0b3JzLWxvZyIsInJvb3RIYXNoIjoiNTJhOWM4YThkZGIzN2M1NTE5NjUzOTNkYjc0OTQ0MzJkYTNkNDI4M2IzMDBmZmVmZTVjMDRhZjdhZDA5ODllZCIsInRpbWVzdGFtcCI6IjIwMjYtMTAtMjRUMjE6NDM6MTYuNjU1WiIsInRyZWVTaXplIjoxfQ==",
+        "payload": "eyJsb2ciOiJ2ZWN0b3JzLWxvZyIsInJvb3RIYXNoIjoiMjk5YTk4YjA3NTFkNzdiN2UyNzgxZGU2MzMwMzhkYWZmYjYxYmEwM2FhZWJhZjZiMDE3ZGI3OTE5ZTk4ZDliNCIsInRpbWVzdGFtcCI6IjIwMjYtMTEtMDFUMTA6MTA6MDMuMzQzWiIsInRyZWVTaXplIjoxfQ==",
         "signatures": [
           {
-            "keyid": "7218437659a7b9b522de300ad9b9e6a8d0f0cb0aef7dc1237a040efb405ce00d",
-            "sig": "p157640WqSaZVAlE7YwWiwFiW/HcI8HRXjV7ejMtCKr63+18OMiOQtYuJeelZjNCRV347Jnx+yvCsecN6yKnDA=="
+            "keyid": "c4de6d4c1616938f8c8c679ebed89781d2fa1565d536032d9054f6c73461df57",
+            "sig": "jPpTYFCQs7cl08hkhs/5J6oMD3BPqbuO97znCbfjBKquXlpmtC+HEb/dhmC0BeJdsi3v3UiMyFJvZT2ffzrfBA=="
           }
         ]
       },
       "newer": {
         "payloadType": "application/vnd.agent-custody.treehead+json",
-        "payload": "eyJsb2ciOiJ2ZWN0b3JzLWxvZyIsInJvb3RIYXNoIjoiZmFmNWFjNzFlOTM5ZDE1ODA2MjgxNmVmNGUxZGFjY2E0YjA4OTBhZjliZjQ4NjliNGE1YmRkNmE1MWIwOWQ4ZiIsInRpbWVzdGFtcCI6IjIwMjYtMTAtMjRUMjE6NDM6MTYuNjYxWiIsInRyZWVTaXplIjoyfQ==",
+        "payload": "eyJsb2ciOiJ2ZWN0b3JzLWxvZyIsInJvb3RIYXNoIjoiN2E3MWJlOTczY2JkODY5N2M3OGQxMDk0MDQ0MzA0YzNhYzMyZTZkNmNlNGNlNmEwNzI5ZjZjOGE5MTYxZDIzZCIsInRpbWVzdGFtcCI6IjIwMjYtMTEtMDFUMTA6MTA6MDMuMzQ4WiIsInRyZWVTaXplIjoyfQ==",
         "signatures": [
           {
-            "keyid": "7218437659a7b9b522de300ad9b9e6a8d0f0cb0aef7dc1237a040efb405ce00d",
-            "sig": "N0MdqFI31VxcLPpPsewFqRI0h+UqMLiI2KNRFxkow2+GcAnEbj3cBegykfQ+PbfqIvolvEq5y3Zf9hJ2ONCKCw=="
+            "keyid": "c4de6d4c1616938f8c8c679ebed89781d2fa1565d536032d9054f6c73461df57",
+            "sig": "UbFM1MwVOvPUQsFzVAAxWBNkvIiJBKAey/q5ta5e6nR1Hfk1nGcFvjgqxUB02rPr7PZTZ9Q0eOMXPq1SnJbuCA=="
           }
         ]
       },
       "proof": [
-        "02c80901df5441cc3211b76b815a783f35b8d8b6bf6c9f967333d316be6a6e5e"
+        "2b8ebb8443eaff76abdec18e26dbaf2aecf78dabf94b4c8a08acfe4f7ca541c5"
       ],
       "keys": [
         "log"
@@ -41,26 +41,26 @@
       "description": "The same heads the wrong way round.",
       "older": {
         "payloadType": "application/vnd.agent-custody.treehead+json",
-        "payload": "eyJsb2ciOiJ2ZWN0b3JzLWxvZyIsInJvb3RIYXNoIjoiZmFmNWFjNzFlOTM5ZDE1ODA2MjgxNmVmNGUxZGFjY2E0YjA4OTBhZjliZjQ4NjliNGE1YmRkNmE1MWIwOWQ4ZiIsInRpbWVzdGFtcCI6IjIwMjYtMTAtMjRUMjE6NDM6MTYuNjYxWiIsInRyZWVTaXplIjoyfQ==",
+        "payload": "eyJsb2ciOiJ2ZWN0b3JzLWxvZyIsInJvb3RIYXNoIjoiN2E3MWJlOTczY2JkODY5N2M3OGQxMDk0MDQ0MzA0YzNhYzMyZTZkNmNlNGNlNmEwNzI5ZjZjOGE5MTYxZDIzZCIsInRpbWVzdGFtcCI6IjIwMjYtMTEtMDFUMTA6MTA6MDMuMzQ4WiIsInRyZWVTaXplIjoyfQ==",
         "signatures": [
           {
-            "keyid": "7218437659a7b9b522de300ad9b9e6a8d0f0cb0aef7dc1237a040efb405ce00d",
-            "sig": "N0MdqFI31VxcLPpPsewFqRI0h+UqMLiI2KNRFxkow2+GcAnEbj3cBegykfQ+PbfqIvolvEq5y3Zf9hJ2ONCKCw=="
+            "keyid": "c4de6d4c1616938f8c8c679ebed89781d2fa1565d536032d9054f6c73461df57",
+            "sig": "UbFM1MwVOvPUQsFzVAAxWBNkvIiJBKAey/q5ta5e6nR1Hfk1nGcFvjgqxUB02rPr7PZTZ9Q0eOMXPq1SnJbuCA=="
           }
         ]
       },
       "newer": {
         "payloadType": "application/vnd.agent-custody.treehead+json",
-        "payload": "eyJsb2ciOiJ2ZWN0b3JzLWxvZyIsInJvb3RIYXNoIjoiNTJhOWM4YThkZGIzN2M1NTE5NjUzOTNkYjc0OTQ0MzJkYTNkNDI4M2IzMDBmZmVmZTVjMDRhZjdhZDA5ODllZCIsInRpbWVzdGFtcCI6IjIwMjYtMTAtMjRUMjE6NDM6MTYuNjU1WiIsInRyZWVTaXplIjoxfQ==",
+        "payload": "eyJsb2ciOiJ2ZWN0b3JzLWxvZyIsInJvb3RIYXNoIjoiMjk5YTk4YjA3NTFkNzdiN2UyNzgxZGU2MzMwMzhkYWZmYjYxYmEwM2FhZWJhZjZiMDE3ZGI3OTE5ZTk4ZDliNCIsInRpbWVzdGFtcCI6IjIwMjYtMTEtMDFUMTA6MTA6MDMuMzQzWiIsInRyZWVTaXplIjoxfQ==",
         "signatures": [
           {
-            "keyid": "7218437659a7b9b522de300ad9b9e6a8d0f0cb0aef7dc1237a040efb405ce00d",
-            "sig": "p157640WqSaZVAlE7YwWiwFiW/HcI8HRXjV7ejMtCKr63+18OMiOQtYuJeelZjNCRV347Jnx+yvCsecN6yKnDA=="
+            "keyid": "c4de6d4c1616938f8c8c679ebed89781d2fa1565d536032d9054f6c73461df57",
+            "sig": "jPpTYFCQs7cl08hkhs/5J6oMD3BPqbuO97znCbfjBKquXlpmtC+HEb/dhmC0BeJdsi3v3UiMyFJvZT2ffzrfBA=="
           }
         ]
       },
       "proof": [
-        "02c80901df5441cc3211b76b815a783f35b8d8b6bf6c9f967333d316be6a6e5e"
+        "2b8ebb8443eaff76abdec18e26dbaf2aecf78dabf94b4c8a08acfe4f7ca541c5"
       ],
       "keys": [
         "log"
@@ -77,26 +77,26 @@
       "description": "Tree heads checked against the app key, which did not sign them.",
       "older": {
         "payloadType": "application/vnd.agent-custody.treehead+json",
-        "payload": "eyJsb2ciOiJ2ZWN0b3JzLWxvZyIsInJvb3RIYXNoIjoiNTJhOWM4YThkZGIzN2M1NTE5NjUzOTNkYjc0OTQ0MzJkYTNkNDI4M2IzMDBmZmVmZTVjMDRhZjdhZDA5ODllZCIsInRpbWVzdGFtcCI6IjIwMjYtMTAtMjRUMjE6NDM6MTYuNjU1WiIsInRyZWVTaXplIjoxfQ==",
+        "payload": "eyJsb2ciOiJ2ZWN0b3JzLWxvZyIsInJvb3RIYXNoIjoiMjk5YTk4YjA3NTFkNzdiN2UyNzgxZGU2MzMwMzhkYWZmYjYxYmEwM2FhZWJhZjZiMDE3ZGI3OTE5ZTk4ZDliNCIsInRpbWVzdGFtcCI6IjIwMjYtMTEtMDFUMTA6MTA6MDMuMzQzWiIsInRyZWVTaXplIjoxfQ==",
         "signatures": [
           {
-            "keyid": "7218437659a7b9b522de300ad9b9e6a8d0f0cb0aef7dc1237a040efb405ce00d",
-            "sig": "p157640WqSaZVAlE7YwWiwFiW/HcI8HRXjV7ejMtCKr63+18OMiOQtYuJeelZjNCRV347Jnx+yvCsecN6yKnDA=="
+            "keyid": "c4de6d4c1616938f8c8c679ebed89781d2fa1565d536032d9054f6c73461df57",
+            "sig": "jPpTYFCQs7cl08hkhs/5J6oMD3BPqbuO97znCbfjBKquXlpmtC+HEb/dhmC0BeJdsi3v3UiMyFJvZT2ffzrfBA=="
           }
         ]
       },
       "newer": {
         "payloadType": "application/vnd.agent-custody.treehead+json",
-        "payload": "eyJsb2ciOiJ2ZWN0b3JzLWxvZyIsInJvb3RIYXNoIjoiZmFmNWFjNzFlOTM5ZDE1ODA2MjgxNmVmNGUxZGFjY2E0YjA4OTBhZjliZjQ4NjliNGE1YmRkNmE1MWIwOWQ4ZiIsInRpbWVzdGFtcCI6IjIwMjYtMTAtMjRUMjE6NDM6MTYuNjYxWiIsInRyZWVTaXplIjoyfQ==",
+        "payload": "eyJsb2ciOiJ2ZWN0b3JzLWxvZyIsInJvb3RIYXNoIjoiN2E3MWJlOTczY2JkODY5N2M3OGQxMDk0MDQ0MzA0YzNhYzMyZTZkNmNlNGNlNmEwNzI5ZjZjOGE5MTYxZDIzZCIsInRpbWVzdGFtcCI6IjIwMjYtMTEtMDFUMTA6MTA6MDMuMzQ4WiIsInRyZWVTaXplIjoyfQ==",
         "signatures": [
           {
-            "keyid": "7218437659a7b9b522de300ad9b9e6a8d0f0cb0aef7dc1237a040efb405ce00d",
-            "sig": "N0MdqFI31VxcLPpPsewFqRI0h+UqMLiI2KNRFxkow2+GcAnEbj3cBegykfQ+PbfqIvolvEq5y3Zf9hJ2ONCKCw=="
+            "keyid": "c4de6d4c1616938f8c8c679ebed89781d2fa1565d536032d9054f6c73461df57",
+            "sig": "UbFM1MwVOvPUQsFzVAAxWBNkvIiJBKAey/q5ta5e6nR1Hfk1nGcFvjgqxUB02rPr7PZTZ9Q0eOMXPq1SnJbuCA=="
           }
         ]
       },
       "proof": [
-        "02c80901df5441cc3211b76b815a783f35b8d8b6bf6c9f967333d316be6a6e5e"
+        "2b8ebb8443eaff76abdec18e26dbaf2aecf78dabf94b4c8a08acfe4f7ca541c5"
       ],
       "keys": [
         "app"
@@ -114,21 +114,21 @@
       "description": "A proof with a hash removed.",
       "older": {
         "payloadType": "application/vnd.agent-custody.treehead+json",
-        "payload": "eyJsb2ciOiJ2ZWN0b3JzLWxvZyIsInJvb3RIYXNoIjoiNTJhOWM4YThkZGIzN2M1NTE5NjUzOTNkYjc0OTQ0MzJkYTNkNDI4M2IzMDBmZmVmZTVjMDRhZjdhZDA5ODllZCIsInRpbWVzdGFtcCI6IjIwMjYtMTAtMjRUMjE6NDM6MTYuNjU1WiIsInRyZWVTaXplIjoxfQ==",
+        "payload": "eyJsb2ciOiJ2ZWN0b3JzLWxvZyIsInJvb3RIYXNoIjoiMjk5YTk4YjA3NTFkNzdiN2UyNzgxZGU2MzMwMzhkYWZmYjYxYmEwM2FhZWJhZjZiMDE3ZGI3OTE5ZTk4ZDliNCIsInRpbWVzdGFtcCI6IjIwMjYtMTEtMDFUMTA6MTA6MDMuMzQzWiIsInRyZWVTaXplIjoxfQ==",
         "signatures": [
           {
-            "keyid": "7218437659a7b9b522de300ad9b9e6a8d0f0cb0aef7dc1237a040efb405ce00d",
-            "sig": "p157640WqSaZVAlE7YwWiwFiW/HcI8HRXjV7ejMtCKr63+18OMiOQtYuJeelZjNCRV347Jnx+yvCsecN6yKnDA=="
+            "keyid": "c4de6d4c1616938f8c8c679ebed89781d2fa1565d536032d9054f6c73461df57",
+            "sig": "jPpTYFCQs7cl08hkhs/5J6oMD3BPqbuO97znCbfjBKquXlpmtC+HEb/dhmC0BeJdsi3v3UiMyFJvZT2ffzrfBA=="
           }
         ]
       },
       "newer": {
         "payloadType": "application/vnd.agent-custody.treehead+json",
-        "payload": "eyJsb2ciOiJ2ZWN0b3JzLWxvZyIsInJvb3RIYXNoIjoiZmFmNWFjNzFlOTM5ZDE1ODA2MjgxNmVmNGUxZGFjY2E0YjA4OTBhZjliZjQ4NjliNGE1YmRkNmE1MWIwOWQ4ZiIsInRpbWVzdGFtcCI6IjIwMjYtMTAtMjRUMjE6NDM6MTYuNjYxWiIsInRyZWVTaXplIjoyfQ==",
+        "payload": "eyJsb2ciOiJ2ZWN0b3JzLWxvZyIsInJvb3RIYXNoIjoiN2E3MWJlOTczY2JkODY5N2M3OGQxMDk0MDQ0MzA0YzNhYzMyZTZkNmNlNGNlNmEwNzI5ZjZjOGE5MTYxZDIzZCIsInRpbWVzdGFtcCI6IjIwMjYtMTEtMDFUMTA6MTA6MDMuMzQ4WiIsInRyZWVTaXplIjoyfQ==",
         "signatures": [
           {
-            "keyid": "7218437659a7b9b522de300ad9b9e6a8d0f0cb0aef7dc1237a040efb405ce00d",
-            "sig": "N0MdqFI31VxcLPpPsewFqRI0h+UqMLiI2KNRFxkow2+GcAnEbj3cBegykfQ+PbfqIvolvEq5y3Zf9hJ2ONCKCw=="
+            "keyid": "c4de6d4c1616938f8c8c679ebed89781d2fa1565d536032d9054f6c73461df57",
+            "sig": "UbFM1MwVOvPUQsFzVAAxWBNkvIiJBKAey/q5ta5e6nR1Hfk1nGcFvjgqxUB02rPr7PZTZ9Q0eOMXPq1SnJbuCA=="
           }
         ]
       },

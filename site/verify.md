@@ -7,8 +7,8 @@ Paste a receipt bundle and the public keys it should verify against. The report 
 ## What to paste
 
 - **The bundle** is the file the gateway or SDK wrote to `receipts/<id>.json`: the signed statement, the signed tree head, and the inclusion proof.
-- **Issuer keys** are the gateway's `.pub` file for gateway receipts, or the application's `.pub` for SDK receipts. Paste more than one to accept rotated keys; signatures match by keyid.
-- **Principal keys** are needed for gateway receipts, which carry a delegation grant signed by the principal.
+- **Issuer keys** are the gateway's `.pub` file for gateway receipts, the door's for door receipts, or the application's `.pub` for SDK receipts. Paste more than one to accept rotated keys; signatures match by keyid.
+- **Principal keys** are needed for gateway receipts, which carry a delegation grant signed by the principal, and for door receipts of an arrival that presented one.
 - **Log keys** are needed only when the receipt was logged to a remote log, whose key signs the tree head.
 - **A copy of the log** is optional. With it, the verifier recomputes the root at the tree head's size and compares.
 

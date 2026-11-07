@@ -79,10 +79,11 @@ A refused call's `execution` row carries the reason the receipt records, for exa
 | --- | --- | --- |
 | receipt signature (issuer key) | the bundle's envelope was signed by a key you trust as an issuer and has not changed since | edited receipt, or an issuer key you do not trust |
 | receipt payload type | the payload is an in-toto Statement with this project's predicate type | wrong file, or a different envelope replayed as a receipt |
-| issuer kind is known | the receipt says whether a gateway or an SDK produced it; the detail shows which, and the framework | a predicate this verifier does not understand |
+| issuer kind is known | the receipt says whether a gateway, a door, or an SDK produced it; the detail shows which, and the framework | a predicate this verifier does not understand |
 | issuer keyid matches signer | the receipt's own claim of who signed it matches the actual signature | mixed-up or forged predicate |
 | gateway receipt carries a delegation | gateway receipts always embed the signed grant they enforced | an SDK receipt relabelled as gateway |
 | gateway receipt carries a policy decision | gateway receipts always record the Cedar decision | same |
+| door receipt carries a policy decision | a door decides every arrival by policy; it carries a grant only when the arrival presented one, so there is no delegation check for it | a record-only receipt relabelled as door |
 | delegation signature (principal key) | the embedded grant was signed by a key you trust as a principal | a grant the principal never issued |
 | delegation chain to the principal | only when the grant embeds a parent: every link is signed by the key its parent names, holds no scope its parent lacks, sits inside its parent's window, and names the same principal, up to three delegations deep | a sub-agent given more than its delegator had, a link signed by the wrong key, a chain that never reaches a trusted principal |
 | delegation binds principal and agent | the grant names the same principal and agent the receipt names, and the principal keyid matches | a valid grant for someone else, spliced in |

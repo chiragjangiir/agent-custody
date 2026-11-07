@@ -164,7 +164,7 @@ export function simulatePolicy(policyText: string, receipts: Iterable<ReceiptPre
     }
     digests.add(previous.policyDigest);
     if (!receiptId || !tool || typeof original.agent.id !== "string" || !original.agent.id
-      || !Number.isFinite(Date.parse(original.timestamp)) || !["sdk", "gateway"].includes(original.issuer.kind)) {
+      || !Number.isFinite(Date.parse(original.timestamp)) || !["sdk", "gateway", "door"].includes(original.issuer.kind)) {
       skip("malformed receipt: receipt id, tool, agent, timestamp, or issuer is invalid"); continue;
     }
     const restored = restorePaths(original, original.capture, options.disclosures?.get(receiptId), options.captureKey);
@@ -186,7 +186,8 @@ export function simulatePolicy(policyText: string, receipts: Iterable<ReceiptPre
       args: p.request.args,
       facts: Object.fromEntries(Object.entries(p.facts).map(([name, fact]) => [name, fact.value])),
     };
-    if (p.issuer.kind === "gateway") {
+    // a door receipt carries a grant only when the arrival presented one; the policy then saw context.grant, else not
+    if (p.issuer.kind === "gateway" || (p.issuer.kind === "door" && p.delegation)) {
       const envelope = p.delegation?.envelope;
       const grant = envelope?.payloadType === DELEGATION_TYPE ? decodeDelegation(envelope) : null;
       if (!grant || grant.agent !== p.agent.id || grant.principal !== p.principal.id) {

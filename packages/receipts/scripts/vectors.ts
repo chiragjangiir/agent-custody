@@ -20,6 +20,10 @@ import { buildFixture, buildSdkFixture } from "./fixture.ts";
 import { financialFixture } from "./financial-fixture.ts";
 import { OPERATION_META_KEY } from "../src/operations.ts";
 import { randomUUID } from "node:crypto";
+import { createDoorHost, RECEIPT_HEADER, serveDoor } from "../src/door.ts";
+import { grantHeader } from "../src/gateway-http.ts";
+import { loadDoorConfig } from "../src/config.ts";
+import { buildDoorFixture, startOrigin } from "./door-fixture.ts";
 
 const out = join(import.meta.dirname, "..", "vectors");
 const decode = (b: ReceiptBundle) => JSON.parse(Buffer.from(b.envelope.payload, "base64").toString()) as ReceiptStatement;
@@ -518,6 +522,35 @@ try {
     ["financial-unrelated-provider-record", "The issuer re-signs a provider result carrying another idempotency key, recomputing the result digest. The provider status check still fails.", (st: ReceiptStatement) => { const result = { content: [{ type: "text", text: JSON.stringify({ status: "succeeded", idempotencyKey: "0".repeat(64) }) }] }; st.predicate.execution = { status: "executed", result, resultDigest: digestOf(result), provenance: "observed" }; }],
   ] as const) addCase({ name, description, bundle: resigned(reconciled, fkey, edit), ...F, log: logLines(ffx.logFile) });
 } finally { await fhost.close(); await ffx.close(); }
+
+// ---- the door: receipts for arrivals at a business's own HTTP surface, issuer kind "door" ----
+{
+  const origin = await startOrigin();
+  const dfx = buildDoorFixture(mkdtempSync(join(tmpdir(), "vectors-door-")), origin.url);
+  key("door", dfx.doorPub);
+  key("door-principal", dfx.principalPub);
+  const dhost = await createDoorHost(loadDoorConfig(dfx.configFile));
+  const door = await serveDoor(dhost, { port: 0, log: () => {} });
+  try {
+    const arrive = async (method: string, path: string, headers: Record<string, string> = {}, body?: unknown) => {
+      const res = await fetch(`${door.url}${path}`, { method, headers: { ...(body !== undefined ? { "content-type": "application/json" } : {}), ...headers }, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) });
+      await res.arrayBuffer();
+      return bundleFile(dfx.receiptsDir, res.headers.get(RECEIPT_HEADER)!);
+    };
+    const D = { issuerKeys: ["door"], principalKeys: ["door-principal"], logKeys: [] as string[] };
+    const readCatalogue = await arrive("GET", "/catalogue/shoes?colour=red");
+    const refusedRefund = await arrive("POST", "/refunds", {}, { order: "o_1", amount: 1000 });
+    const grant = createDelegation(dfx.principalKey, { version: "0.1", principal: "shop-owner", agent: "shopping-agent", scopes: ["refund", "api"], issuedAt: new Date(Date.now() - 1000).toISOString(), expiresAt: new Date(Date.now() + 3600_000).toISOString() });
+    const verifiedRefund = await arrive("POST", "/refunds", { authorization: `Bearer ${grantHeader(grant)}` }, { order: "o_2", amount: 4500 });
+    const dlog = logLines(dfx.logFile);
+    addCase({ name: "door-unknown-executed", description: "An arrival that presented nothing reads a public route through the door: issuer kind door, principal claimed, agent `unknown` claimed, the arrival fact observed, relayed and executed. Verifies with the door's key alone.", bundle: readCatalogue, ...D, principalKeys: [], log: dlog });
+    addCase({ name: "door-unknown-denied", description: "The same unknown arrival asks for a refund and the policy refuses it: a denied door receipt, nothing relayed, verified without any principal key.", bundle: refusedRefund, ...D, principalKeys: [], log: dlog });
+    addCase({ name: "door-verified-executed", description: "An agent presents a grant signed by the shop's principal, in scope for the refund route: the arrival is verified, principal and agent attested, the delegation checks run, the request is committed to the log as an authorization before it is relayed, and the refund is relayed. The authorization checks run and pass.", bundle: verifiedRefund, ...D, log: dlog });
+    addCase({ name: "door-verified-without-principal-trust", description: "The verified refund checked without the principal's key: the delegation signature fails, as for a gateway receipt.", bundle: verifiedRefund, ...D, principalKeys: [], log: dlog });
+    const doorKey = loadPrivateKey(join(dfx.dir, "keys", "door.key"));
+    addCase({ name: "resigned-door-no-policy", description: "A door receipt re-signed with its policy decision removed. A door decides every arrival by policy, so `door receipt carries a policy decision` fails.", bundle: resigned(readCatalogue, doorKey, (st) => { st.predicate.policy = null; }), ...D, principalKeys: [], log: dlog });
+  } finally { await door.close(); await dhost.close(); await origin.close(); }
+}
 
 writeFileSync(join(out, "receipts.json"), JSON.stringify({ version: "0.2", generated: new Date().toISOString(), note: "Each case: verify `bundle` with the named keys (see `keys`) and, when `log` is not null, a copy of the log whose lines are these leaves. `expected.failing` lists the check names that must fail; `expected.ok` is true only when it is empty.", keys, cases }, null, 2) + "\n");
 

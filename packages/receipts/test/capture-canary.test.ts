@@ -22,6 +22,11 @@ import { createSdkIssuer } from "../src/sdk/index.ts";
 import { hecEvent } from "../src/splunk.ts";
 import { formatReport, verifyBundle } from "../src/verify.ts";
 import { buildFixture, buildSdkFixture } from "../scripts/fixture.ts";
+import { buildDoorFixture, startOrigin } from "../scripts/door-fixture.ts";
+import { loadDoorConfig } from "../src/config.ts";
+import { createDelegation } from "../src/delegation.ts";
+import { createDoorHost, RECEIPT_HEADER as DOOR_RECEIPT_HEADER, serveDoor } from "../src/door.ts";
+import { grantHeader } from "../src/gateway-http.ts";
 
 const CANARY = `CANARY_${randomBytes(8).toString("hex")}`;
 const decode = (b: ReceiptBundle) => JSON.parse(Buffer.from(b.envelope.payload, "base64").toString()) as ReceiptStatement;
@@ -448,4 +453,43 @@ describe("the canary", () => {
     const clear = createSdkIssuer(loadSdkConfig(buildSdkFixture(mkdtempSync(join(tmpdir(), "canary-sdk-control-"))).configFile));
     expect(bundleText(await clear.record(ev, { status: "error", error: `declined for ${CANARY}` }))).toContain(CANARY);
   });
+
+  // The door is a path a call can take: its arguments are the query and the body an arrival sent. A config with no rule
+  // keeps both out of every place a receipt reaches; the control, with a rule that keeps arguments in clear, finds them.
+  for (const control of [false, true]) {
+    it(control ? "the door control: with arguments kept in clear, the canary is in the statement, the files, the log, and the exports" : "at the door with no capture rule, a secret in the query or the body reaches nothing in clear: relayed, refused, pre-committed, withheld by the log, the origin down", async () => {
+      const origin = await startOrigin();
+      const dir = mkdtempSync(join(tmpdir(), control ? "canary-door-control-" : "canary-door-"));
+      const fx = buildDoorFixture(dir, origin.url, { capture: control ? { "*": { args: { mode: "clear" } } } : undefined });
+      const exports = keepExports();
+      const host = await createDoorHost(loadDoorConfig(fx.configFile), { exporter: exports.exporter });
+      const door = await serveDoor(host, { port: 0, log: () => {} });
+      const refusing: LogSink = { kind: "file", where: "refusing", append: async () => { throw new Error("the log is full"); } };
+      const outboxHost = await createDoorHost(loadDoorConfig(fx.configFile), { exporter: exports.exporter, log: refusing });
+      const outboxDoor = await serveDoor(outboxHost, { port: 0, log: () => {} });
+      const deadFx = buildDoorFixture(join(dir, "dead"), "http://127.0.0.1:9", { origin: { url: "http://127.0.0.1:9" }, capture: control ? { "*": { args: { mode: "clear" } } } : undefined });
+      const deadHost = await createDoorHost(loadDoorConfig(deadFx.configFile), { exporter: exports.exporter });
+      const deadDoor = await serveDoor(deadHost, { port: 0, log: () => {} });
+      const grant = createDelegation(fx.principalKey, { version: "0.1", principal: "shop-owner", agent: "shopping-agent", scopes: ["refund"], issuedAt: new Date(Date.now() - 1000).toISOString(), expiresAt: new Date(Date.now() + 60_000).toISOString() });
+      const json = { "content-type": "application/json" };
+      try {
+        const answers = [
+          await fetch(`${door.url}/catalogue/shoes?api_key=${CANARY}`),
+          await fetch(`${door.url}/refunds`, { method: "POST", headers: json, body: JSON.stringify({ order: CANARY, amount: 100 }) }),
+          await fetch(`${door.url}/refunds?note=${CANARY}`, { method: "POST", headers: { ...json, authorization: `Bearer ${grantHeader(grant)}` }, body: JSON.stringify({ order: CANARY, amount: 100 }) }),
+          await fetch(`${outboxDoor.url}/refunds`, { method: "POST", headers: { ...json, authorization: `Bearer ${grantHeader(grant)}` }, body: JSON.stringify({ order: CANARY, amount: 100 }) }),
+          await fetch(`${deadDoor.url}/catalogue/x?q=${CANARY}`),
+        ];
+        expect(answers.map((a) => a.status)).toEqual([200, 403, 200, 503, 502]);
+        for (const a of answers) expect(a.headers.get(DOOR_RECEIPT_HEADER)).toBeTruthy();
+        const text = [onDisk(fx.receiptsDir, fx.logFile), onDisk(deadFx.receiptsDir, deadFx.logFile), exports.seen.join("\n")].join("\n");
+        if (control) expect(text).toContain(CANARY);
+        else expect(text).not.toContain(CANARY);
+      } finally {
+        for (const d of [door, outboxDoor, deadDoor]) await d.close();
+        for (const h of [host, outboxHost, deadHost]) await h.close();
+        await origin.close();
+      }
+    });
+  }
 });

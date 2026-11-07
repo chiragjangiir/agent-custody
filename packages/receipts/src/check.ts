@@ -6,7 +6,7 @@ import * as cedar from "@cedar-policy/cedar-wasm/nodejs";
 import { accessSync, constants, existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, isAbsolute, join, resolve } from "node:path";
-import { GatewayConfigSchema, loadConfig, strictRefusals, type GatewayConfig } from "./config.ts";
+import { DoorConfigSchema, GatewayConfigSchema, loadConfig, loadDoorConfig, strictRefusals, type GatewayConfig } from "./config.ts";
 import { generateKeyPair, loadPrivateKey, loadPublicKey, writeKeyPair, type Envelope, type PublicKeyRef } from "./crypto.ts";
 import { delegationValidAt, verifyDelegation } from "./delegation.ts";
 import { hasPermitRule } from "./policy.ts";
@@ -66,6 +66,118 @@ function writableAncestor(path: string): string | null {
 function onPath(command: string): boolean {
   if (isAbsolute(command) || command.includes("/")) return existsSync(command);
   return (process.env.PATH ?? "").split(delimiter).some((d) => d && existsSync(join(d, command)));
+}
+
+/** True when the file is a door config rather than a gateway config: it names an origin, which no gateway config has. */
+export function isDoorConfig(configPath: string): boolean {
+  try {
+    const raw = JSON.parse(readFileSync(configPath, "utf8")) as unknown;
+    return !!raw && typeof raw === "object" && !Array.isArray(raw) && "origin" in raw && !("upstream" in raw) && !("upstreams" in raw);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The agents named by permits that do not also require a verified arrival. At the door the principal is the agent of a
+ * verified grant, or `unknown`, so such a permit admits only a verified agent; the warning is for the reader who
+ * expects it to admit a declared name, as the same text would at the gateway.
+ */
+export function permitsNamingAgentWithoutVerifiedArrival(policyText: string): string[] {
+  const parts = cedar.policySetTextToParts(policyText);
+  if (parts.type !== "success") return [];
+  const out: string[] = [];
+  for (const policy of parts.policies) {
+    const j = cedar.policyToJson(policy);
+    if (j.type !== "success" || j.json.effect !== "permit") continue;
+    const principal = j.json.principal as { op: string; entity?: { type: string; id: string } };
+    if (principal.op === "All" || !principal.entity) continue;
+    const conditions = JSON.stringify(j.json.conditions ?? []);
+    if (conditions.includes('"class"') && conditions.includes('"verified"')) continue;
+    out.push(`${principal.entity.type}::"${principal.entity.id}"`);
+  }
+  return out;
+}
+
+/** `agent-custody check` on a door config: what the door would fail on at startup, and what it would silently do less than the config seems to promise. */
+export function checkDoorConfig(configPath: string): CheckFinding[] {
+  const out: CheckFinding[] = [];
+  const add = (level: CheckFinding["level"], check: string, message: string) => out.push({ level, check, message });
+  let raw: unknown;
+  try {
+    raw = JSON.parse(readFileSync(configPath, "utf8"));
+  } catch (e) {
+    add("error", "config", `${configPath} is not readable JSON: ${e instanceof Error ? e.message : String(e)}`);
+    return out;
+  }
+  const known = Object.keys(DoorConfigSchema.shape);
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    for (const key of Object.keys(raw)) {
+      if (known.includes(key)) continue;
+      const near = known.find((k) => distance(k.toLowerCase(), key.toLowerCase()) <= 2);
+      add("error", "config", `unknown key "${key}" is ignored by the door${near ? `; did you mean "${near}"?` : ""} A mistyped key leaves the setting it was meant for at its default`);
+    }
+  }
+  const parsed = DoorConfigSchema.safeParse(raw);
+  if (!parsed.success) {
+    for (const issue of parsed.error.issues) add("error", "config", `${issue.path.join(".") || "(root)"}: ${issue.message}`);
+    return out;
+  }
+  add("ok", "config", "the config parses");
+  const cfg = loadDoorConfig(configPath);
+  if (!existsSync(cfg.identity.keyFile)) add("warn", "key", `${cfg.identity.keyFile} does not exist yet; \`agent-custody keygen\` creates it`);
+  else {
+    try {
+      loadPrivateKey(cfg.identity.keyFile);
+      add("ok", "key", `the door key at ${cfg.identity.keyFile} loads`);
+      if (process.platform !== "win32" && (statSync(cfg.identity.keyFile).mode & 0o077) !== 0) add("warn", "key", `${cfg.identity.keyFile} is readable by other users; make it mode 0600`);
+    } catch (e) {
+      add("error", "key", `${cfg.identity.keyFile}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  let principals = 0;
+  for (const f of cfg.trustedPrincipalKeys) {
+    try {
+      loadPublicKey(f);
+      principals++;
+    } catch (e) {
+      add("error", "principal keys", `${f}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  if (cfg.trustedPrincipalKeys.length === 0) add("warn", "principal keys", "no trusted principal keys: no arrival can be verified, every one is claimed or unknown");
+  else if (principals === cfg.trustedPrincipalKeys.length) add("ok", "principal keys", `${principals} trusted principal key${principals === 1 ? "" : "s"} load`);
+  if (!existsSync(cfg.policyFile)) add("error", "policy", `${cfg.policyFile} does not exist`);
+  else {
+    const text = readFileSync(cfg.policyFile, "utf8");
+    const r = cedar.checkParsePolicySet({ staticPolicies: text });
+    if (r.type !== "success") for (const e of r.errors) add("error", "policy", `${cfg.policyFile}: ${e.message}`);
+    else if (!hasPermitRule(text)) add("warn", "policy", `${cfg.policyFile} has no permit rule, so every arrival is refused`);
+    else {
+      add("ok", "policy", "the policy parses");
+      for (const name of permitsNamingAgentWithoutVerifiedArrival(text)) add("warn", "policy", `a permit names ${name} without requiring context.facts.arrival.class == "verified": the principal is that agent only for a verified grant, so this permit admits nothing else; if it was copied from a gateway policy, add the arrival condition`);
+    }
+  }
+  if (cfg.mode === "observe") add("warn", "mode", "observe mode relays every arrival and records what the policy would have decided; nothing is refused by policy");
+  add("ok", "precommit", cfg.precommit.includes("*") ? "every arrival is committed to the log before it is relayed" : `every POST, PUT, PATCH, and DELETE${cfg.precommit.length ? `, and every arrival at ${cfg.precommit.join(", ")},` : ""} is committed to the log before it is relayed`);
+  if (cfg.routes.length === 0) add("warn", "routes", `no routes: every arrival is the action "${cfg.unmatchedRoute}"`);
+  else add("ok", "routes", `${cfg.routes.length} route(s); unmatched arrivals are "${cfg.unmatchedRoute}"`);
+  const origin = new URL(cfg.origin.url);
+  if (origin.protocol !== "https:" && !["localhost", "127.0.0.1", "[::1]"].includes(origin.hostname)) add("warn", "origin", `${cfg.origin.url} is plain HTTP to a remote host; the relayed traffic is not encrypted on that leg`);
+  else add("ok", "origin", `relays to ${cfg.origin.url}`);
+  for (const [, variable] of Object.entries(cfg.origin.headerEnv ?? {})) if (!process.env[variable]) add("error", "credentials", `origin header variable ${variable} is not set in this environment`);
+  if (cfg.log?.tokenEnv && !process.env[cfg.log.tokenEnv]) add("error", "credentials", `log token variable ${cfg.log.tokenEnv} is not set in this environment`);
+  if (cfg.splunk?.tokenEnv && !process.env[cfg.splunk.tokenEnv]) add("error", "credentials", `splunk token variable ${cfg.splunk.tokenEnv} is not set in this environment`);
+  for (const v of Object.values(cfg.otel?.headersEnv ?? {})) if (!process.env[v]) add("error", "credentials", `otel header variable ${v} is not set in this environment`);
+  for (const f of cfg.log?.keys ?? []) if (!existsSync(f)) add("error", "log keys", `${f} does not exist`);
+  if (cfg.captureKeyEnv && !process.env[cfg.captureKeyEnv]) add("error", "credentials", `capture key variable ${cfg.captureKeyEnv} is not set in this environment`);
+  const dir = writableAncestor(cfg.receiptsDir);
+  if (!dir) add("error", "paths", `${cfg.receiptsDir} cannot be created: no writable directory above it`);
+  else add("ok", "paths", `receipts go to ${cfg.receiptsDir}`);
+  if (cfg.logFile) {
+    const ldir = writableAncestor(cfg.logFile);
+    if (!ldir) add("error", "paths", `${cfg.logFile} cannot be written`);
+  }
+  return out;
 }
 
 export async function checkConfig(configPath: string, options: CheckOptions = {}): Promise<CheckFinding[]> {

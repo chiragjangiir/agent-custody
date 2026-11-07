@@ -84,6 +84,7 @@ export default withMermaid(
           { text: "Reference", items: [
             { text: "Overview", link: "/reference/" },
             { text: "The gateway", link: "/reference/gateway" },
+            { text: "The door", link: "/reference/door" },
             { text: "TypeScript SDK", link: "/reference/sdk-typescript" },
             { text: "Sidecar HTTP API", link: "/reference/sidecar" },
             { text: "Python", link: "/reference/python" },
@@ -116,6 +117,7 @@ export default withMermaid(
           { text: "Configuring the gateway", link: "/receipts/configuration" },
           { text: "The gateway console", link: "/receipts/console" },
           { text: "The gateway", link: "/receipts/usage" },
+          { text: "The door", link: "/receipts/door" },
           { text: "Live Codex recovery demo", link: "/receipts/codex-recovery" },
           { text: "Payload-bound approvals", link: "/receipts/approvals" },
           { text: "The interceptor SDK and other languages", link: "/receipts/sdk" },

@@ -8,6 +8,7 @@
 | --- | --- | --- |
 | SDK in the agent's process | self-reported, every field `claimed` | the agent's own process |
 | gateway, local log | observed outside the agent, tamper-evident to anyone holding a copy | the operator, who holds the key and the file |
+| door in front of your own site or API | observed outside the arrival; who the arrival was is attested only when it presented a grant, else claimed | the operator, as for the gateway; the log choices below apply the same way |
 | gateway, log run by someone else | tree heads signed by a key the operator does not hold | the log's operator, with yours |
 | the same, with a witness | checkpoints countersigned by a second signer nobody in the chain controls | both operators and the witness, together |
 | the same, anchored on a chain | checkpoints committed to Ethereum, or another EVM chain, from a published address | the log's operator, only for what no anchor covers yet |

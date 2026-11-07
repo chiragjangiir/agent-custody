@@ -7,6 +7,7 @@ Every feature of agent-custody, how to use it, and the exact request and respons
 | piece | package | what it is | reference |
 | --- | --- | --- | --- |
 | Gateway | `@agent-custody/receipts` | a process between the agent and its tools: checks the grant and the policy, forwards or denies, issues a receipt | [gateway](./gateway) |
+| Door | `@agent-custody/receipts` | a reverse proxy in front of your own site or API: classifies every arrival, decides by policy per route, relays or refuses, issues a receipt | [door](./door) |
 | SDK | `@agent-custody/receipts` | the same issuer inside the agent's process, for tools that are plain functions; adapters for the frameworks | [TypeScript SDK](./sdk-typescript) |
 | Sidecar | `@agent-custody/receipts` | the SDK as a local HTTP API, for agents in any language | [sidecar](./sidecar) |
 | Python | `agent-custody` on PyPI | the sidecar client, framework adapters, and the memory client | [Python](./python) |
