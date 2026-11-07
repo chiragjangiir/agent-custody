@@ -72,22 +72,22 @@
   },
   "dependencies": {
     "@cedar-policy/cedar-wasm": "4.12.0",
-    "@modelcontextprotocol/sdk": "^1.30.0",
-    "zod": "^4.5.4"
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "zod": "4.5.4"
   },
   "devDependencies": {
     "@electric-sql/pglite": "0.5.8",
-    "@langchain/core": "^1.2.9",
-    "@node-saml/node-saml": "^5.1.0",
-    "@openai/agents": "^0.18.0",
-    "@types/node": "^26.4.1",
-    "ai": "^7.0.92",
+    "@langchain/core": "1.2.9",
+    "@node-saml/node-saml": "5.1.0",
+    "@openai/agents": "0.18.0",
+    "@types/node": "26.4.1",
+    "ai": "7.0.93",
     "langchain": "1.5.15",
-    "tsx": "^4.23.13",
-    "typescript": "^7.0.2",
+    "tsx": "4.23.13",
+    "typescript": "7.0.2",
     "viem": "2.57.4",
-    "vitest": "^5.0.0",
-    "xml-crypto": "^6.1.2"
+    "vitest": "5.0.0",
+    "xml-crypto": "6.4.0"
   },
   "peerDependencies": {
     "@langchain/core": ">=1.0.0",
