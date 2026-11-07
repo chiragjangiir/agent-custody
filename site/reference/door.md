@@ -20,6 +20,7 @@ A reverse proxy in front of your own website, API, or forms. Where the [gateway]
   "policyFile": "policy.cedar",
   "mode": "enforce",
   "trustProxy": false,
+  "challenge": { "provider": "turnstile", "siteKey": "0x4AAA...", "secretEnv": "TURNSTILE_SECRET", "hostnames": ["shop.example"] },
   "maxBodyBytes": 1048576,
   "maxResponseBytes": 33554432,
   "maxInFlight": 256,
@@ -43,6 +44,7 @@ A reverse proxy in front of your own website, API, or forms. Where the [gateway]
 | `maxBodyBytes` | integer, default 1 MiB | a larger request body the policy allowed is refused with 413 and receipted as `withheld`; one the policy refuses is `denied` as any other |
 | `maxResponseBytes` | integer, default 32 MiB | a larger origin response is not relayed: 502, and the receipt records the origin's act by size |
 | `maxInFlight` | integer, default 256 | arrivals handled at once; past it, 503 with `Retry-After: 1` before the body is read, no receipt |
+| `challenge` | `{ provider, siteKey, secretEnv, hostnames, action?, header?, timeoutMs?, maxInFlight? }`, optional | `provider`: `turnstile` or `hcaptcha`. A token in `header` (default `x-agent-custody-challenge`) is posted with the secret from `secretEnv` to the provider's `siteverify`, with the arrival's address as `remoteip` only under `trustProxy`, within `timeoutMs` (default 5000), never following a redirect, and the answer is the arrival's `challenge` signal. To hCaptcha `siteKey` is sent as `sitekey`. It passes only when the provider confirms it and reports one of `hostnames` (required) and, when set, `action` (Turnstile only). A token longer than 4096 characters (`MAX_CHALLENGE_TOKEN`) is `failed` without a call. Provider and operator faults (`internal-error`, `bad-request`, `missing-input-secret`, `invalid-input-secret`, `sitekey-secret-mismatch`, `invalid-sitekey`, `missing-sitekey`, `invalid-remoteip`), a non-200, a non-JSON answer, a redirect, and a timeout are `unavailable`; every other refusal is `failed`, with the codes in `error`. At most `maxInFlight` (default 64) checks wait at once; past that the outcome is `unavailable`. A token serves one request: the provider refuses one it has seen and the door remembers no pass, so a page takes a new token (`turnstile.reset()`, `hcaptcha.reset()`) before every request and every retry. The secret is read at startup; missing is a startup error. The token is stripped before relay and never recorded |
 | `precommit` | strings, default `[]` | route names whose arrivals are committed to the log before they are relayed whatever their method, or `["*"]`. Every arrival whose method is not GET, HEAD, or OPTIONS is committed regardless |
 | `receiptsDir`, `logFile` or `log`, `otel`, `splunk`, `capture`, `captureKeyEnv` | | as for the [gateway](./gateway#the-config-file). Capture rules are keyed by route name. Without a rule for the route and without a `"*"` rule, the door applies `DOOR_DEFAULT_CAPTURE`: `args` in digest mode with `method`, `path`, `headers`, `bodyBytes`, `bodyOversized` in clear; the query, the body, and `bodyDigest` are withheld as `request.args.$rest`; `facts` and `result` clear. A remote `log` needs `log.keys` |
 
@@ -53,9 +55,9 @@ agent-custody check --config door.json
 agent-custody door --config door.json [--port 8780] [--host 127.0.0.1]
 ```
 
-Plain HTTP; bind to loopback or put TLS in front. `check` on a door config reports unknown keys, the key, the principal keys, the policy (and warns on a permit that names an agent without requiring `context.facts.arrival.class == "verified"`), the routes, what is precommitted, the origin's scheme, every credential variable the door reads at startup (origin headers, log, Splunk, OTel, capture key), and the paths; exit 1 on an error.
+Plain HTTP; bind to loopback or put TLS in front. `check` on a door config reports unknown keys, the key, the principal keys, the policy (and warns on a permit that names an agent without requiring `context.facts.arrival.class == "verified"`), the routes, what is precommitted, the challenge provider or its absence, the origin's scheme, every credential variable the door reads at startup (origin headers, log, Splunk, OTel, capture key, challenge secret), and the paths; exit 1 on an error.
 
-In code: `createDoorHost(cfg, { log?, exporter?, fetch?, autoFlush? })` returns a `DoorHost` with `keyid`, `policyDigest()`, `handle(req, res)`, `flushOutbox()`, `pendingReceipts()`, `close()`. `serveDoor(host, { port, host?, log? })` returns `{ url, close() }`. `normalizePath(pathname)`, `matchRoute(routes, unmatched, method, path)`, `classifyArrival(req, trustedKeys, route, trustProxy, atIso)` (which leaves `rate` unset), `cedarArgs(args)`, `DOOR_DEFAULT_CAPTURE`, and `createRateTracker(now?, { maxSources?, maxKeyLength? })`, whose clock defaults to the monotonic `performance.now` and which returns `{ hit(source), size(), close() }`, costs the same per hit however full the window, keeps at most `maxSources` (10000) sources, keeps a key longer than `maxKeyLength` (256) as its sha256, and drops stale sources every minute, are exported for embedding the door in a server of your own.
+In code: `createDoorHost(cfg, { log?, exporter?, fetch?, autoFlush? })` returns a `DoorHost` with `keyid`, `policyDigest()`, `handle(req, res)`, `flushOutbox()`, `pendingReceipts()`, `close()`. `serveDoor(host, { port, host?, log? })` returns `{ url, close() }`. `normalizePath(pathname)`, `matchRoute(routes, unmatched, method, path)`, `classifyArrival(req, trustedKeys, route, trustProxy, atIso)` (which leaves `rate` unset), `cedarArgs(args)`, `DOOR_DEFAULT_CAPTURE`, `createRateTracker(now?, { maxSources?, maxKeyLength? })`, whose clock defaults to the monotonic `performance.now` and which returns `{ hit(source), size(), close() }`, costs the same per hit however full the window, keeps at most `maxSources` (10000) sources, keeps a key longer than `maxKeyLength` (256) as its sha256, and drops stale sources every minute, and `verifyChallengeToken({ provider, secret, token, remoteIp?, hostnames, action?, siteKey?, timeoutMs }, fetch)` are exported for embedding the door in a server of your own.
 
 ## What an arrival presents
 
@@ -71,10 +73,10 @@ In code: `createDoorHost(cfg, { log?, exporter?, fetch?, autoFlush? })` returns 
 Recorded as `facts.arrival` (observed) and given to the policy as `context.facts.arrival`:
 
 ```json
-{ "class": "verified", "subject": "shopping-agent", "grant": "verified", "signature": false, "remote": "203.0.113.9", "method": "POST", "path": "/refunds", "route": "refund", "rate": { "by": "agent", "burst": 1, "minute": 4 } }
+{ "class": "verified", "subject": "shopping-agent", "grant": "verified", "signature": false, "remote": "203.0.113.9", "method": "POST", "path": "/refunds", "route": "refund", "rate": { "by": "agent", "burst": 1, "minute": 4 }, "challenge": { "provider": "turnstile", "outcome": "absent" } }
 ```
 
-`class`: `verified` | `claimed` | `unknown`. `grant`: `verified` | `out-of-scope` | `invalid` | `absent`, with `grantError` when not verified. `declared` when the agent header was sent. `rate`: arrivals from the same source in the last 10 s (`burst`) and 60 s (`minute`), this one included, counted in this process; `by` is `agent` (a verified agent's name) or `remote` (the address). There is no `human` class. `subject` reaches the Cedar principal only when `class` is `verified`. What each field does and does not mean: [door signals](/receipts/door-signals).
+`class`: `verified` | `claimed` | `unknown`. `grant`: `verified` | `out-of-scope` | `invalid` | `absent`, with `grantError` when not verified. `declared` when the agent header was sent. `rate`: arrivals from the same source in the last 10 s (`burst`) and 60 s (`minute`), this one included, counted in this process; `by` is `agent` (a verified agent's name) or `remote` (the address). `challenge`, only when configured: `{ provider, outcome, error? }`, `outcome` one of `passed`, `failed`, `unavailable`, `absent`; it never changes `class`. There is no `human` class. `subject` reaches the Cedar principal only when `class` is `verified`. What each field does and does not mean: [door signals](/receipts/door-signals).
 
 ## The Cedar request
 
@@ -89,7 +91,7 @@ An arrival whose method is not GET, HEAD, or OPTIONS, or whose route is in `prec
 | outcome | status | body | headers | receipt `execution` |
 | --- | --- | --- | --- | --- |
 | relayed | the origin's | the origin's | the origin's, minus hop-by-hop, plus the door's; a `Location` on the origin's host, on any scheme or port, becomes a path on the door: under the origin's path it loses that prefix, and any other path is kept as it is | `executed`; `failed` on an origin 5xx. `result` is `{ status, contentType?, bodyBytes, bodyDigest }` |
-| denied, whatever the body's size | 403 | `{ "error": "refused by the door's policy", "reason", "receipt" }` | the door's | `denied` |
+| denied, whatever the body's size | 403 | `{ "error": "refused by the door's policy", "reason", "receipt" }`, plus `"challenge": { provider, siteKey, header }` when a challenge is configured and this arrival has not passed it | the door's | `denied` |
 | origin unreachable (connection refused, host not resolved) | 502 | `{ "error": "the origin could not be reached", "detail", "receipt" }` | the door's | `error` |
 | outcome unknown (timeout, reset, body stopped after the headers) | 504 | `{ "error": "the origin may have acted on the request; its answer did not arrive. Do not retry", "detail", "receipt" }` | the door's | `error`; `error` says the origin may have acted |
 | allowed, body too large | 413 | `{ "error": "not relayed", "reason", "receipt" }` | the door's | `withheld` |
@@ -109,4 +111,4 @@ Receipt v0.2 with `issuer: { kind: "door", keyid, version, framework: "http" }`.
 
 ## Not yet
 
-Agent detection in web or API traffic, RFC 9421 and Web Bot Auth verification (so a grant is not yet bound to its sender), AP2 mandates, a challenge branch, grant revocation lists, streamed request bodies, and streamed responses or responses above `maxResponseBytes` (a larger response is cut at the limit: 502 to the client, `executed` with `bodyOversized` in the receipt).
+Agent detection in web or API traffic, RFC 9421 and Web Bot Auth verification (so a grant is not yet bound to its sender), AP2 mandates, passkeys as a challenge, grant revocation lists, streamed request bodies, and streamed responses or responses above `maxResponseBytes` (a larger response is cut at the limit: 502 to the client, `executed` with `bodyOversized` in the receipt).

@@ -18,7 +18,7 @@ import { loadDoorConfig } from "../src/config.ts";
 import { generateKeyPair, loadPublicKey, sha256Hex } from "../src/crypto.ts";
 import { createDelegation } from "../src/delegation.ts";
 import { isCommitment } from "../src/capture.ts";
-import { AGENT_HEADER, ARRIVAL_FACT, CLASS_HEADER, RECEIPT_HEADER, cedarArgs, createDoorHost, createRateTracker, matchRoute, RATE_BURST_MS, RATE_MINUTE_MS, normalizePath, queryOf, remoteOf, serveDoor, type Arrival, type DoorHost, type RunningDoor } from "../src/door.ts";
+import { AGENT_HEADER, ARRIVAL_FACT, CLASS_HEADER, RECEIPT_HEADER, cedarArgs, createDoorHost, createRateTracker, matchRoute, RATE_BURST_MS, RATE_MINUTE_MS, normalizePath, queryOf, remoteOf, serveDoor, verifyChallengeToken, MAX_CHALLENGE_TOKEN, type Arrival, type ChallengeCheck, type DoorHost, type RunningDoor } from "../src/door.ts";
 import { grantHeader } from "../src/gateway-http.ts";
 import type { LogSink } from "../src/log-sink.ts";
 import type { ReceiptBundle, ReceiptStatement } from "../src/receipt.ts";
@@ -255,6 +255,173 @@ describe("rate", () => {
 });
 
 describe("the door", () => {
+  it("a challenge token is verified with the provider and the outcome is a signal: absent refused with the way in, failed refused with the reason, passed relayed without the token, provider down recorded as unavailable", async () => {
+    process.env.DOOR_TEST_TURNSTILE = "secret-1";
+    const gated = buildDoorFixture(mkdtempSync(join(tmpdir(), "agent-custody-door-challenge-")), origin.url, { challenge: { provider: "turnstile", siteKey: "site-1", secretEnv: "DOOR_TEST_TURNSTILE", hostnames: ["Shop.example"] } });
+    writeFileSync(join(gated.dir, "policy.cedar"), 'permit(principal, action == Action::"refund", resource) when { context.facts.arrival.challenge.outcome == "passed" };\n');
+    const asked: Array<Record<string, string>> = [];
+    const stub: typeof fetch = async (input, init) => {
+      const u = String(input instanceof Request ? input.url : input);
+      if (!u.startsWith("https://challenges.cloudflare.com/")) return fetch(input, init);
+      const form = Object.fromEntries(new URLSearchParams(String(init?.body)));
+      asked.push(form);
+      if (form.response === "down") throw new Error("ECONNREFUSED");
+      return new Response(JSON.stringify(form.response === "good" ? { success: true, hostname: "shop.example" } : { success: false, "error-codes": ["invalid-input-response"] }), { headers: { "content-type": "application/json" } });
+    };
+    const h = await createDoorHost(loadDoorConfig(gated.configFile), { fetch: stub });
+    const d = await serveDoor(h, { port: 0, log: () => {} });
+    const post = (token?: string) => fetch(`${d.url}/refunds`, { method: "POST", headers: { "content-type": "application/json", ...(token ? { "x-agent-custody-challenge": token } : {}) }, body: JSON.stringify({ order: "o-1", amount: 500 }) });
+    const arrivalOf = (res: Response) => (decode(JSON.parse(readFileSync(join(gated.receiptsDir, `${res.headers.get(RECEIPT_HEADER)}.json`), "utf8")) as ReceiptBundle).predicate.facts[ARRIVAL_FACT]!.value as Arrival);
+    try {
+      const none = await post();
+      expect(none.status).toBe(403);
+      expect(await none.json()).toMatchObject({ challenge: { provider: "turnstile", siteKey: "site-1", header: "x-agent-custody-challenge" } });
+      expect(arrivalOf(none)).toMatchObject({ class: "unknown", challenge: { provider: "turnstile", outcome: "absent" } });
+      const bad = await post("bad");
+      expect(bad.status).toBe(403);
+      expect(arrivalOf(bad).challenge).toEqual({ provider: "turnstile", outcome: "failed", error: "invalid-input-response" });
+      const seenBefore = origin.seen.length;
+      const good = await post("good");
+      expect(good.status).toBe(200);
+      expect((await good.json()).ok).toBe(true);
+      expect(arrivalOf(good)).toMatchObject({ class: "unknown", challenge: { provider: "turnstile", outcome: "passed" } });
+      const relayed = origin.seen[seenBefore]!;
+      expect(relayed.headers["x-agent-custody-challenge"]).toBeUndefined();
+      const down = await post("down");
+      expect(down.status).toBe(403);
+      expect(arrivalOf(down).challenge).toMatchObject({ outcome: "unavailable", error: "ECONNREFUSED" });
+      expect(asked.map((q) => q.response)).toEqual(["bad", "good", "down"]);
+      expect(asked[0]).toMatchObject({ secret: "secret-1" });
+      // without trustProxy the socket's address may be a proxy's: it is not sent as the client's
+      expect(asked[0]!.remoteip).toBeUndefined();
+    } finally {
+      await d.close();
+      await h.close();
+    }
+    try {
+      expect(checkDoorConfig(gated.configFile).filter((f) => f.level === "error")).toEqual([]);
+    } finally {
+      delete process.env.DOOR_TEST_TURNSTILE;
+    }
+    expect(checkDoorConfig(gated.configFile).filter((f) => f.level === "error").map((f) => f.message)).toEqual([expect.stringContaining("DOOR_TEST_TURNSTILE")]);
+    await expect(createDoorHost(loadDoorConfig(gated.configFile), { fetch: stub })).rejects.toThrow("DOOR_TEST_TURNSTILE");
+  });
+
+  // A policy treats `failed` as the arrival's fault and `unavailable` as the provider's. A rotated secret must not make
+  // every person look like an attacker, and a flood of junk tokens must not reach the provider at all.
+  it("each provider answer maps to the outcome it means: token faults fail, provider and secret faults are unavailable, and no answer is unavailable", async () => {
+    let calls = 0;
+    const signals: (AbortSignal | null | undefined)[] = [];
+    const urls: string[] = [];
+    const forms: URLSearchParams[] = [];
+    const answers: Record<string, (signal?: AbortSignal | null) => Response | Promise<Response>> = {
+      "invalid-input-response": () => Response.json({ success: false, "error-codes": ["invalid-input-response"] }),
+      "timeout-or-duplicate": () => Response.json({ success: false, "error-codes": ["timeout-or-duplicate"] }),
+      "already-seen-response": () => Response.json({ success: false, "error-codes": ["already-seen-response"] }),
+      "invalid-input-secret": () => Response.json({ success: false, "error-codes": ["invalid-input-secret"] }),
+      "internal-error": () => Response.json({ success: false, "error-codes": ["internal-error"] }),
+      "sitekey-secret-mismatch": () => Response.json({ success: false, "error-codes": ["sitekey-secret-mismatch"] }),
+      "no-codes": () => Response.json({ success: false }),
+      "status-500": () => new Response("busy", { status: 500 }),
+      "status-429": () => new Response("slow down", { status: 429 }),
+      "not-json": () => new Response("<html>maintenance</html>", { status: 200, headers: { "content-type": "text/html" } }),
+      "never": (signal) => new Promise<Response>((_r, reject) => signal?.addEventListener("abort", () => reject(signal.reason))),
+      "hcaptcha-good": () => Response.json({ success: true, hostname: "shop.example" }),
+    };
+    const stub: typeof fetch = async (input, init) => {
+      calls += 1;
+      urls.push(String(input));
+      signals.push(init?.signal);
+      const form = new URLSearchParams(String(init?.body));
+      forms.push(form);
+      return answers[form.get("response")!]!(init?.signal);
+    };
+    const check = (token: string, provider: ChallengeCheck["provider"] = "turnstile") => verifyChallengeToken({ provider, secret: "s", token, hostnames: ["shop.example"], siteKey: "site-9", timeoutMs: 200 }, stub);
+    for (const token of ["invalid-input-response", "timeout-or-duplicate", "already-seen-response", "no-codes"]) expect(await check(token)).toMatchObject({ outcome: "failed" });
+    expect(await check("timeout-or-duplicate")).toEqual({ provider: "turnstile", outcome: "failed", error: "timeout-or-duplicate" });
+    for (const token of ["invalid-input-secret", "internal-error", "sitekey-secret-mismatch"]) expect(await check(token)).toEqual({ provider: "turnstile", outcome: "unavailable", error: `the provider could not check the token: ${token}` });
+    expect(await check("status-500")).toMatchObject({ outcome: "unavailable", error: "the provider answered 500" });
+    expect(await check("status-429")).toMatchObject({ outcome: "unavailable", error: "the provider answered 429" });
+    expect(await check("not-json")).toMatchObject({ outcome: "unavailable" });
+    expect(await check("never")).toMatchObject({ outcome: "unavailable", error: expect.stringMatching(/timeout|aborted/i) });
+    // every call carries its own timeout signal
+    expect(signals.every((sig) => sig instanceof AbortSignal)).toBe(true);
+    // Turnstile's secret is tied to one widget: no sitekey. hCaptcha's belongs to the account: the sitekey goes with it
+    expect(forms.every((f) => !f.has("sitekey"))).toBe(true);
+    expect(urls.every((u) => u === "https://challenges.cloudflare.com/turnstile/v0/siteverify")).toBe(true);
+    expect(await check("hcaptcha-good", "hcaptcha")).toEqual({ provider: "hcaptcha", outcome: "passed" });
+    expect(urls.at(-1)).toBe("https://api.hcaptcha.com/siteverify");
+    expect(forms.at(-1)!.get("sitekey")).toBe("site-9");
+    // a value no provider would issue is refused without a call
+    const before = calls;
+    expect(await check("x".repeat(MAX_CHALLENGE_TOKEN + 1))).toMatchObject({ outcome: "failed", error: expect.stringContaining(`longer than ${MAX_CHALLENGE_TOKEN}`) });
+    expect(calls).toBe(before);
+  });
+
+  it("a passed challenge must come from one of the site's hostnames and its action, over a call that never follows a redirect", async () => {
+    const answers: Record<string, () => Response> = {
+      good: () => Response.json({ success: true, hostname: "shop.example", action: "refund" }),
+      elsewhere: () => Response.json({ success: true, hostname: "evil.example", action: "refund" }),
+      nohost: () => Response.json({ success: true, action: "refund" }),
+      login: () => Response.json({ success: true, hostname: "shop.example", action: "login" }),
+      redirect: () => new Response(null, { status: 307, headers: { location: "https://evil.example/collect" } }),
+    };
+    const seen: RequestInit[] = [];
+    const stub: typeof fetch = async (_input, init) => { seen.push(init!); return answers[String(new URLSearchParams(String(init?.body)).get("response"))]!(); };
+    const check = (token: string, extra: Partial<ChallengeCheck> = {}) => verifyChallengeToken({ provider: "turnstile", secret: "s", token, hostnames: ["shop.example"], action: "refund", timeoutMs: 1000, ...extra }, stub);
+    expect(await check("good")).toEqual({ provider: "turnstile", outcome: "passed" });
+    expect(await check("elsewhere")).toMatchObject({ outcome: "failed", error: expect.stringContaining("evil.example") });
+    expect(await check("nohost")).toMatchObject({ outcome: "failed", error: expect.stringContaining("no hostname") });
+    expect(await check("login")).toMatchObject({ outcome: "failed", error: expect.stringContaining("action login, not refund") });
+    expect(await check("login", { action: undefined })).toMatchObject({ outcome: "passed" });
+    // a 307 would resend the secret and the token to its Location: the call does not follow it, and the outcome is unavailable
+    expect(await check("redirect")).toMatchObject({ outcome: "unavailable", error: expect.stringContaining("redirect (307)") });
+    expect(seen.every((init) => init.redirect === "manual")).toBe(true);
+    expect(new URLSearchParams(String(seen[0]!.body)).has("remoteip")).toBe(false);
+    await check("good", { remoteIp: "203.0.113.9" });
+    expect(new URLSearchParams(String(seen.at(-1)!.body)).get("remoteip")).toBe("203.0.113.9");
+  });
+
+  it("bounds the challenge checks waiting on the provider: past the limit an arrival is unavailable, never relayed", async () => {
+    process.env.DOOR_TEST_TURNSTILE = "secret-1";
+    const gated = buildDoorFixture(mkdtempSync(join(tmpdir(), "agent-custody-door-inflight-")), origin.url, { trustProxy: true, challenge: { provider: "turnstile", siteKey: "site-1", secretEnv: "DOOR_TEST_TURNSTILE", hostnames: ["shop.example"], maxInFlight: 1 } });
+    writeFileSync(join(gated.dir, "policy.cedar"), 'permit(principal, action == Action::"refund", resource) when { context.facts.arrival.challenge.outcome == "passed" };\n');
+    let release!: () => void;
+    const held = new Promise<void>((r) => { release = r; });
+    let started!: () => void;
+    const waiting = new Promise<void>((r) => { started = r; });
+    const forms: URLSearchParams[] = [];
+    const stub: typeof fetch = async (input, init) => {
+      const u = String(input instanceof Request ? input.url : input);
+      if (!u.startsWith("https://challenges.cloudflare.com/")) return fetch(input, init);
+      forms.push(new URLSearchParams(String(init?.body)));
+      started();
+      await held;
+      return Response.json({ success: true, hostname: "shop.example" });
+    };
+    const h = await createDoorHost(loadDoorConfig(gated.configFile), { fetch: stub });
+    const d = await serveDoor(h, { port: 0, log: () => {} });
+    const post = () => fetch(`${d.url}/refunds`, { method: "POST", headers: { "content-type": "application/json", "x-agent-custody-challenge": "t", "x-forwarded-for": "198.51.100.7" }, body: JSON.stringify({ order: "o-1", amount: 500 }) });
+    const arrivalOf = (res: Response) => (decode(JSON.parse(readFileSync(join(gated.receiptsDir, `${res.headers.get(RECEIPT_HEADER)}.json`), "utf8")) as ReceiptBundle).predicate.facts[ARRIVAL_FACT]!.value as Arrival);
+    try {
+      const first = post();
+      await waiting;
+      const second = await post();
+      expect(second.status).toBe(403);
+      expect(arrivalOf(second).challenge).toMatchObject({ outcome: "unavailable", error: expect.stringContaining("1 challenge checks") });
+      release();
+      expect((await first).status).toBe(200);
+      expect(forms).toHaveLength(1);
+      // with trustProxy the door knows the client's address, and the provider may check the token against it
+      expect(forms[0]!.get("remoteip")).toBe("198.51.100.7");
+    } finally {
+      release();
+      await d.close();
+      await h.close();
+      delete process.env.DOOR_TEST_TURNSTILE;
+    }
+  });
+
   it("every arrival carries its source's rate, by address for an unverified arrival and by agent for a verified one, and a policy can refuse on it", async () => {
     const paced = buildDoorFixture(mkdtempSync(join(tmpdir(), "agent-custody-door-rate-")), origin.url);
     writeFileSync(join(paced.dir, "policy.cedar"), 'permit(principal, action, resource);\nforbid(principal, action, resource) when { context.facts.arrival.rate.burst > 2 };\n');

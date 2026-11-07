@@ -170,6 +170,10 @@ export function checkDoorConfig(configPath: string): CheckFinding[] {
   for (const v of Object.values(cfg.otel?.headersEnv ?? {})) if (!process.env[v]) add("error", "credentials", `otel header variable ${v} is not set in this environment`);
   for (const f of cfg.log?.keys ?? []) if (!existsSync(f)) add("error", "log keys", `${f} does not exist`);
   if (cfg.captureKeyEnv && !process.env[cfg.captureKeyEnv]) add("error", "credentials", `capture key variable ${cfg.captureKeyEnv} is not set in this environment`);
+  if (cfg.challenge) {
+    if (!process.env[cfg.challenge.secretEnv]) add("error", "credentials", `challenge secret variable ${cfg.challenge.secretEnv} is not set in this environment`);
+    add("ok", "challenge", `${cfg.challenge.provider} tokens in the ${cfg.challenge.header} header are verified with the provider; the outcome is context.facts.arrival.challenge.outcome, and class is unchanged by it`);
+  } else add("ok", "challenge", "no challenge: an unknown arrival has no way to become anything else on this door");
   const dir = writableAncestor(cfg.receiptsDir);
   if (!dir) add("error", "paths", `${cfg.receiptsDir} cannot be created: no writable directory above it`);
   else add("ok", "paths", `receipts go to ${cfg.receiptsDir}`);
