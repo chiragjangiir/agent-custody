@@ -1,0 +1,38 @@
+# Builds the Lean specification in spec/lean, which checks every proof, and runs the model against the conformance
+# vectors. A proof left as `sorry`, or resting on an axiom beyond Lean's standard three, fails the job. elan comes from a pinned release, checked by its SHA-256.
+name: lean
+
+on:
+  push:
+    branches: [main]
+    paths: ["spec/lean/**", "packages/receipts/vectors/**", "packages/receipts/src/log.ts", ".github/workflows/lean.yml"]
+  pull_request:
+    paths: ["spec/lean/**", "packages/receipts/vectors/**", "packages/receipts/src/log.ts", ".github/workflows/lean.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  lean:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: spec/lean
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: install elan 4.2.4
+        run: |
+          curl -sSfL -o /tmp/elan.tar.gz https://github.com/leanprover/elan/releases/download/v4.2.4/elan-x86_64-unknown-linux-gnu.tar.gz
+          echo "42b94d4244e8353142c456ec0e4ca6528fd898a6c604d4059f494e706e431f63  /tmp/elan.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/elan.tar.gz -C /tmp
+          /tmp/elan-init -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+      - name: build and check the proofs
+        run: lake build
+      - name: no sorry
+        run: |
+          if grep -rn --include='*.lean' -w sorry .; then echo "a proof is left as sorry"; exit 1; fi
+      - name: every theorem rests only on propext, Classical.choice and Quot.sound
+        run: ./check-axioms.sh
+      - name: the model against the vectors
+        run: lake exe vectors

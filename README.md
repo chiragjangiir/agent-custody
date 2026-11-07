@@ -229,6 +229,7 @@ packages/receipts/    the receipts package: src, test, examples, scripts, docs
 packages/python/      the Python client package: agent_custody, tests run with uv against a real sidecar
 packages/state/       the state package: src, test, examples
 site/                 the website, generated from this repository's markdown by VitePress
+spec/lean/            a Lean 4 model of the verifier's core with machine-checked proofs; not shipped
 ```
 
 ## Plan
