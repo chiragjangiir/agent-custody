@@ -103,9 +103,17 @@ export async function verifyDelegationChain(env: Envelope, trusted: PublicKey[],
 // ---- RFC 6962 / 9162 ----
 const leafHash = (data: string) => sha256(concat(new Uint8Array([0]), enc.encode(data)));
 const nodeHash = (l: Bytes, r: Bytes) => sha256(concat(new Uint8Array([1]), l, r));
+// every hash a proof check reads is 32 bytes: a proof hash and a root are each a string of 64 lowercase hex digits;
+// sizes and indices are integers, since the loops halve them with Math.floor
+const HASH_HEX = /^[0-9a-f]{64}$/;
+const isHash = (x: unknown): x is string => typeof x === "string" && HASH_HEX.test(x);
+const isSize = (n: unknown): n is number => Number.isSafeInteger(n) && (n as number) >= 0;
+const EMPTY_ROOT = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 export async function verifyInclusion(leaf: Bytes, proof: Bundle["inclusion"], rootHex: string): Promise<boolean> {
+  if (!isSize(proof.leafIndex) || !isSize(proof.treeSize)) return false;
   let fn = proof.leafIndex, sn = proof.treeSize - 1;
   if (fn < 0 || sn < 0 || fn > sn) return false;
+  if (leaf.length !== 32 || !isHash(rootHex) || !Array.isArray(proof.hashes) || !proof.hashes.every(isHash)) return false;
   let r = leaf;
   for (const h of proof.hashes) {
     if (sn === 0) return false;
@@ -117,9 +125,11 @@ export async function verifyInclusion(leaf: Bytes, proof: Bundle["inclusion"], r
   return sn === 0 && hex(r) === rootHex;
 }
 export async function verifyConsistency(oldSize: number, oldRoot: string, newSize: number, newRoot: string, proofHex: string[]): Promise<boolean> {
-  if (oldSize < 0 || oldSize > newSize) return false;
+  if (!isSize(oldSize) || !isSize(newSize) || oldSize > newSize) return false;
+  if (!isHash(oldRoot) || !isHash(newRoot) || !Array.isArray(proofHex) || !proofHex.every(isHash)) return false;
+  // the empty tree has one root, sha256 of nothing; any other root at size 0, old or new, is a head no log could have signed
+  if (oldSize === 0) return proofHex.length === 0 && oldRoot === EMPTY_ROOT && (newSize > 0 || newRoot === EMPTY_ROOT);
   if (oldSize === newSize) return proofHex.length === 0 && oldRoot === newRoot;
-  if (oldSize === 0) return proofHex.length === 0;
   if (proofHex.length === 0) return false;
   const proof = proofHex.map(unhex);
   if ((oldSize & (oldSize - 1)) === 0) proof.unshift(unhex(oldRoot));

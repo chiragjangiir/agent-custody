@@ -543,10 +543,24 @@ const merkle = {
   leaves,
   leafHashes: hashes.map((h) => h.toString("hex")),
   roots: Array.from({ length: 8 }, (_, n) => rootOf(hashes, n)),
-  inclusion: leaves.map((_, i) => ({ leafIndex: i, treeSize: 7, hashes: inclusionProof(hashes, i, 7).hashes, root: rootOf(hashes, 7), expected: true })),
+  inclusion: [
+    ...leaves.map((_, i) => ({ leafIndex: i, treeSize: 7, hashes: inclusionProof(hashes, i, 7).hashes, root: rootOf(hashes, 7), expected: true })),
+    // a case may name its leaf hash; otherwise the leaf is leafHashes[leafIndex]
+    { leafIndex: 2.5, treeSize: 7, leafHash: hashes[2]!.toString("hex"), hashes: inclusionProof(hashes, 2, 7).hashes, root: rootOf(hashes, 7), expected: false, description: "an index is an integer: leaf 2's own proof walks the same path from index 2.5 when the loop halves with floor" },
+    { leafIndex: 0, treeSize: 7, hashes: inclusionProof(hashes, 0, 7).hashes.map((h, i) => (i === 0 ? `${h}\n` : h)), root: rootOf(hashes, 7), expected: false, description: "a proof hash is exactly 64 lowercase hex digits: a trailing newline is refused" },
+    { leafIndex: 0, treeSize: 7, hashes: inclusionProof(hashes, 0, 7).hashes, root: rootOf(hashes, 7).toUpperCase(), expected: false, description: "a root is 64 lowercase hex digits, as a signed tree head must carry it" },
+  ],
   consistency: [
     ...[[0, 7], [1, 7], [2, 5], [3, 7], [4, 7], [5, 6], [7, 7]].map(([m, n]) => ({ oldSize: m, newSize: n, oldRoot: rootOf(hashes, m!), newRoot: rootOf(hashes, n!), hashes: consistencyProof(hashes, m!, n!), expected: true })),
     { oldSize: 3, newSize: 7, oldRoot: rootOf(hashes, 3), newRoot: rootOf(hashes.map((h, i) => (i === 1 ? leafHash("leaf-1-edited") : h)), 7), hashes: consistencyProof(hashes.map((h, i) => (i === 1 ? leafHash("leaf-1-edited") : h)), 3, 7), expected: false, description: "leaf 1 rewritten after the older head was taken" },
+    { oldSize: 0, newSize: 7, oldRoot: rootOf(hashes, 7), newRoot: rootOf(hashes, 7), hashes: [], expected: false, description: "an old head of size 0 whose root is not the empty tree's root, sha256 of nothing" },
+    { oldSize: 0, newSize: 7, oldRoot: rootOf(hashes, 0), newRoot: rootOf(hashes, 7), hashes: [hashes[0]!.toString("hex")], expected: false, description: "RFC 9162 has no consistency proof from size 0: a hash beside the empty tree's root is refused" },
+    { oldSize: 0, newSize: 7, oldRoot: rootOf(hashes, 0).toUpperCase(), newRoot: rootOf(hashes, 7), hashes: [], expected: false, description: "a root is 64 lowercase hex digits, as a signed tree head must carry it: the empty tree's root in uppercase is refused" },
+    { oldSize: 0, newSize: 0, oldRoot: "ab".repeat(32), newRoot: "ab".repeat(32), hashes: [], expected: false, description: "two heads of size 0 with the same root that is not the empty tree's root" },
+    { oldSize: 0, newSize: 0, oldRoot: rootOf(hashes, 0), newRoot: rootOf(hashes, 0), hashes: [], expected: true, description: "two heads of size 0, each with the empty tree's root" },
+    { oldSize: 1.5, newSize: 7, oldRoot: rootOf(hashes, 1), newRoot: rootOf(hashes, 7), hashes: consistencyProof(hashes, 1, 7), expected: false, description: "a size is an integer: the proof from size 1 also passes from 1.5 when the loop halves with floor" },
+    { oldSize: 1, newSize: 6.5, oldRoot: rootOf(hashes, 1), newRoot: rootOf(hashes, 7), hashes: consistencyProof(hashes, 1, 7), expected: false, description: "a size is an integer: the proof to size 7 also passes to 6.5" },
+    { oldSize: 1, newSize: 7, oldRoot: rootOf(hashes, 1), newRoot: rootOf(hashes, 7), hashes: consistencyProof(hashes, 1, 7).map((h, i) => (i === 0 ? `${h}\n` : h)), expected: false, description: "a proof hash is exactly 64 lowercase hex digits: a trailing newline is refused" },
   ],
 };
 writeFileSync(join(out, "merkle.json"), JSON.stringify(merkle, null, 2) + "\n");

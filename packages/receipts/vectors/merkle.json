@@ -105,6 +105,43 @@
       ],
       "root": "0b007fb915eb9b2a146f54b1c86ec53b664f8e455b7660b0b6ee13edc0d921c0",
       "expected": true
+    },
+    {
+      "leafIndex": 2.5,
+      "treeSize": 7,
+      "leafHash": "fca89f57c9f8c8eb4047a7ff9d333acf9e0f3384b20b255bceab0f216dcca267",
+      "hashes": [
+        "f76836325aec5699d8d71f8e42e9d47c5c29b08059ba296384f7ca40ad3a40ae",
+        "60a53eed0de87a90c8e59427c59c46253c33a76a09502a51801300927b7e6bdc",
+        "8eae6bd3b3a07f1f75ee72a531629e6eb31e42e62f760e47de52a53c3641ef23"
+      ],
+      "root": "0b007fb915eb9b2a146f54b1c86ec53b664f8e455b7660b0b6ee13edc0d921c0",
+      "expected": false,
+      "description": "an index is an integer: leaf 2's own proof walks the same path from index 2.5 when the loop halves with floor"
+    },
+    {
+      "leafIndex": 0,
+      "treeSize": 7,
+      "hashes": [
+        "3145c409f259b7c53e32036090ff76751025a2498ba9823ef718cac50b4e616f\n",
+        "bd45ff28796704d88bdac51b1df553fda59837b616d6d1cb2114dbc3b087ff69",
+        "8eae6bd3b3a07f1f75ee72a531629e6eb31e42e62f760e47de52a53c3641ef23"
+      ],
+      "root": "0b007fb915eb9b2a146f54b1c86ec53b664f8e455b7660b0b6ee13edc0d921c0",
+      "expected": false,
+      "description": "a proof hash is exactly 64 lowercase hex digits: a trailing newline is refused"
+    },
+    {
+      "leafIndex": 0,
+      "treeSize": 7,
+      "hashes": [
+        "3145c409f259b7c53e32036090ff76751025a2498ba9823ef718cac50b4e616f",
+        "bd45ff28796704d88bdac51b1df553fda59837b616d6d1cb2114dbc3b087ff69",
+        "8eae6bd3b3a07f1f75ee72a531629e6eb31e42e62f760e47de52a53c3641ef23"
+      ],
+      "root": "0B007FB915EB9B2A146F54B1C86EC53B664F8E455B7660B0B6EE13EDC0D921C0",
+      "expected": false,
+      "description": "a root is 64 lowercase hex digits, as a signed tree head must carry it"
     }
   ],
   "consistency": [
@@ -195,6 +232,92 @@
       ],
       "expected": false,
       "description": "leaf 1 rewritten after the older head was taken"
+    },
+    {
+      "oldSize": 0,
+      "newSize": 7,
+      "oldRoot": "0b007fb915eb9b2a146f54b1c86ec53b664f8e455b7660b0b6ee13edc0d921c0",
+      "newRoot": "0b007fb915eb9b2a146f54b1c86ec53b664f8e455b7660b0b6ee13edc0d921c0",
+      "hashes": [],
+      "expected": false,
+      "description": "an old head of size 0 whose root is not the empty tree's root, sha256 of nothing"
+    },
+    {
+      "oldSize": 0,
+      "newSize": 7,
+      "oldRoot": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "newRoot": "0b007fb915eb9b2a146f54b1c86ec53b664f8e455b7660b0b6ee13edc0d921c0",
+      "hashes": [
+        "305df59f9590c3c9ac63d2b2743c388e3792449078cebf7fb3dbe6471643b2b7"
+      ],
+      "expected": false,
+      "description": "RFC 9162 has no consistency proof from size 0: a hash beside the empty tree's root is refused"
+    },
+    {
+      "oldSize": 0,
+      "newSize": 7,
+      "oldRoot": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855",
+      "newRoot": "0b007fb915eb9b2a146f54b1c86ec53b664f8e455b7660b0b6ee13edc0d921c0",
+      "hashes": [],
+      "expected": false,
+      "description": "a root is 64 lowercase hex digits, as a signed tree head must carry it: the empty tree's root in uppercase is refused"
+    },
+    {
+      "oldSize": 0,
+      "newSize": 0,
+      "oldRoot": "abababababababababababababababababababababababababababababababab",
+      "newRoot": "abababababababababababababababababababababababababababababababab",
+      "hashes": [],
+      "expected": false,
+      "description": "two heads of size 0 with the same root that is not the empty tree's root"
+    },
+    {
+      "oldSize": 0,
+      "newSize": 0,
+      "oldRoot": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "newRoot": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "hashes": [],
+      "expected": true,
+      "description": "two heads of size 0, each with the empty tree's root"
+    },
+    {
+      "oldSize": 1.5,
+      "newSize": 7,
+      "oldRoot": "305df59f9590c3c9ac63d2b2743c388e3792449078cebf7fb3dbe6471643b2b7",
+      "newRoot": "0b007fb915eb9b2a146f54b1c86ec53b664f8e455b7660b0b6ee13edc0d921c0",
+      "hashes": [
+        "3145c409f259b7c53e32036090ff76751025a2498ba9823ef718cac50b4e616f",
+        "bd45ff28796704d88bdac51b1df553fda59837b616d6d1cb2114dbc3b087ff69",
+        "8eae6bd3b3a07f1f75ee72a531629e6eb31e42e62f760e47de52a53c3641ef23"
+      ],
+      "expected": false,
+      "description": "a size is an integer: the proof from size 1 also passes from 1.5 when the loop halves with floor"
+    },
+    {
+      "oldSize": 1,
+      "newSize": 6.5,
+      "oldRoot": "305df59f9590c3c9ac63d2b2743c388e3792449078cebf7fb3dbe6471643b2b7",
+      "newRoot": "0b007fb915eb9b2a146f54b1c86ec53b664f8e455b7660b0b6ee13edc0d921c0",
+      "hashes": [
+        "3145c409f259b7c53e32036090ff76751025a2498ba9823ef718cac50b4e616f",
+        "bd45ff28796704d88bdac51b1df553fda59837b616d6d1cb2114dbc3b087ff69",
+        "8eae6bd3b3a07f1f75ee72a531629e6eb31e42e62f760e47de52a53c3641ef23"
+      ],
+      "expected": false,
+      "description": "a size is an integer: the proof to size 7 also passes to 6.5"
+    },
+    {
+      "oldSize": 1,
+      "newSize": 7,
+      "oldRoot": "305df59f9590c3c9ac63d2b2743c388e3792449078cebf7fb3dbe6471643b2b7",
+      "newRoot": "0b007fb915eb9b2a146f54b1c86ec53b664f8e455b7660b0b6ee13edc0d921c0",
+      "hashes": [
+        "3145c409f259b7c53e32036090ff76751025a2498ba9823ef718cac50b4e616f\n",
+        "bd45ff28796704d88bdac51b1df553fda59837b616d6d1cb2114dbc3b087ff69",
+        "8eae6bd3b3a07f1f75ee72a531629e6eb31e42e62f760e47de52a53c3641ef23"
+      ],
+      "expected": false,
+      "description": "a proof hash is exactly 64 lowercase hex digits: a trailing newline is refused"
     }
   ]
 }

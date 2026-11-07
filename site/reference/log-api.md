@@ -4,7 +4,7 @@ The transparency log is an RFC 6962 Merkle tree of receipt leaf hashes whose hea
 
 ## Files
 
-A log file is one JSON value per line: a leaf string, `{"hash":"<64 hex>"}` for a leaf appended by hash, or `{"pruned":"<64 hex>"}` for a leaf whose content was removed by retention. The tree is rebuilt from the file on open. `MerkleLog` in `@agent-custody/receipts`: `append(leaf)`, `appendHash(hex)`, `root(size?)`, `inclusionProof(leafIndex, treeSize?)`, `consistencyProof(oldSize, newSize?)`, `leafHashes(from, to)`; `leafHash(data)`, `rootOf(hashes, size?)`, `verifyInclusion(leaf, proof, root)`, `verifyConsistency(oldSize, oldRoot, newSize, newRoot, proof)` are the primitives.
+A log file is one JSON value per line: a leaf string, `{"hash":"<64 hex>"}` for a leaf appended by hash, or `{"pruned":"<64 hex>"}` for a leaf whose content was removed by retention. The tree is rebuilt from the file on open. `MerkleLog` in `@agent-custody/receipts`: `append(leaf)`, `appendHash(hex)`, `root(size?)`, `inclusionProof(leafIndex, treeSize?)`, `consistencyProof(oldSize, newSize?)`, `leafHashes(from, to)`; `leafHash(data)`, `rootOf(hashes, size?)`, `verifyInclusion(leaf, proof, root)`, `verifyConsistency(oldSize, oldRoot, newSize, newRoot, proof)` are the primitives. They refuse, before any hashing, a proof hash or a root that is not a string of 64 lowercase hex digits, a leaf that is not 32 bytes, and an index or a size that is not a non-negative integer; a head of size 0 passes only with the empty tree's root, `sha256("")`, and an empty proof.
 
 ## The server
 

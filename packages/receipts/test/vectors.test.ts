@@ -41,7 +41,7 @@ describe("conformance vectors", () => {
     const hashes = (merkle.leaves as string[]).map(leafHash);
     expect(hashes.map((h) => h.toString("hex"))).toEqual(merkle.leafHashes);
     for (let n = 0; n <= 7; n++) expect(rootOf(hashes, n)).toBe(merkle.roots[n]);
-    for (const p of merkle.inclusion) expect(verifyInclusion(hashes[p.leafIndex]!, p, p.root)).toBe(p.expected);
+    for (const p of merkle.inclusion) expect(verifyInclusion(p.leafHash ? Buffer.from(p.leafHash, "hex") : hashes[p.leafIndex]!, p, p.root), p.description ?? `${p.leafIndex}`).toBe(p.expected);
     for (const c of merkle.consistency) expect(verifyConsistency(c.oldSize, c.oldRoot, c.newSize, c.newRoot, c.hashes), `${c.oldSize}->${c.newSize}`).toBe(c.expected);
   });
 
