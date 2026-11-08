@@ -108,6 +108,8 @@ const nodeHash = (l: Bytes, r: Bytes) => sha256(concat(new Uint8Array([1]), l, r
 const HASH_HEX = /^[0-9a-f]{64}$/;
 const isHash = (x: unknown): x is string => typeof x === "string" && HASH_HEX.test(x);
 const isSize = (n: unknown): n is number => Number.isSafeInteger(n) && (n as number) >= 0;
+// exact for every safe integer: `(n & (n - 1)) === 0` reads only the low 32 bits of n
+const isPowerOfTwo = (n: number) => { let k = 1; while (k < n) k *= 2; return k === n; };
 const EMPTY_ROOT = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 export async function verifyInclusion(leaf: Bytes, proof: Bundle["inclusion"], rootHex: string): Promise<boolean> {
   if (!isSize(proof.leafIndex) || !isSize(proof.treeSize)) return false;
@@ -132,7 +134,7 @@ export async function verifyConsistency(oldSize: number, oldRoot: string, newSiz
   if (oldSize === newSize) return proofHex.length === 0 && oldRoot === newRoot;
   if (proofHex.length === 0) return false;
   const proof = proofHex.map(unhex);
-  if ((oldSize & (oldSize - 1)) === 0) proof.unshift(unhex(oldRoot));
+  if (isPowerOfTwo(oldSize)) proof.unshift(unhex(oldRoot));
   let fn = oldSize - 1, sn = newSize - 1;
   while (fn % 2 === 1) { fn = Math.floor(fn / 2); sn = Math.floor(sn / 2); }
   let fr = proof[0]!, sr = proof[0]!;

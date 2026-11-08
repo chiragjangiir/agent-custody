@@ -1,13 +1,15 @@
 # Builds the Lean specification in spec/lean, which checks every proof, and runs the model against the conformance
 # vectors. A proof left as `sorry`, or resting on an axiom beyond Lean's standard three, fails the job. elan comes from a pinned release, checked by its SHA-256.
+# Then fuzzes the model against the three Merkle verifiers people run (log.ts, verify-web.ts, verify.py): once with a
+# fixed seed, and once with a random seed that the log prints, so that a failure can be replayed.
 name: lean
 
 on:
   push:
     branches: [main]
-    paths: ["spec/lean/**", "packages/receipts/vectors/**", "packages/receipts/src/log.ts", ".github/workflows/lean.yml"]
+    paths: ["spec/lean/**", "packages/receipts/vectors/**", "packages/receipts/src/log.ts", "packages/state/src/verify-web.ts", "packages/python/agent_custody/verify.py", ".github/workflows/lean.yml"]
   pull_request:
-    paths: ["spec/lean/**", "packages/receipts/vectors/**", "packages/receipts/src/log.ts", ".github/workflows/lean.yml"]
+    paths: ["spec/lean/**", "packages/receipts/vectors/**", "packages/receipts/src/log.ts", "packages/state/src/verify-web.ts", "packages/python/agent_custody/verify.py", ".github/workflows/lean.yml"]
 
 permissions:
   contents: read
@@ -15,6 +17,7 @@ permissions:
 jobs:
   lean:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: spec/lean
@@ -36,3 +39,13 @@ jobs:
         run: ./check-axioms.sh
       - name: the model against the vectors
         run: lake exe vectors
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.3.2
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          python-version: "3.12"
+      - name: differential fuzzing, fixed seed
+        run: bun fuzz/merkle.ts --seed 20261108
+      - name: differential fuzzing, random seed
+        run: bun fuzz/merkle.ts --seed random

@@ -121,9 +121,8 @@ def verifyConsistency [DecidableEq H] (oldSize : Nat) (oldRoot : H) (newSize : N
   else if oldSize = newSize then proof.isEmpty && oldRoot == newRoot
   else if proof.isEmpty then false
   else
-    -- a power-of-two old size: its root is the first hash, and the proof leaves it out. `log.ts` tests
-    -- `(oldSize & (oldSize - 1)) === 0`, and JavaScript's `&` works on the low 32 bits of each side.
-    let p := if (oldSize % 2 ^ 32) &&& ((oldSize - 1) % 2 ^ 32) = 0 then oldRoot :: proof else proof
+    -- a power-of-two old size: its root is the first hash, and the proof leaves it out (`isPowerOfTwo` in `log.ts`)
+    let p := if oldSize &&& (oldSize - 1) = 0 then oldRoot :: proof else proof
     match p with
     | [] => false
     | first :: rest =>

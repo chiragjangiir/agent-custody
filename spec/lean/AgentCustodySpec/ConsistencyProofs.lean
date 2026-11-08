@@ -379,7 +379,7 @@ theorem verifyConsistency_sound [DecidableEq H] (hinj : ∀ a b c d, node a b = 
   · simp at h
   simp only [List.isEmpty_cons] at h
   -- the hashes the loop reads, with the old root in front when the old size is a power of two
-  generalize hP : (if m % 4294967296 &&& (m - 1) % 4294967296 = 0 then r0 :: p0 :: ps else p0 :: ps) = P at h
+  generalize hP : (if m &&& (m - 1) = 0 then r0 :: p0 :: ps else p0 :: ps) = P at h
   have hne : P ≠ [] := by rw [← hP]; split <;> simp
   have hloop : iterC node m l.length P = some (r0, mth node empty l) := by
     match P, hne with

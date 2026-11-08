@@ -32,6 +32,13 @@ const EMPTY_ROOT = createHash("sha256").digest("hex");
 // Sizes and indices are integers. The loops halve them with Math.floor, so a fraction such as 6.5 can walk a real path.
 const isSize = (n: unknown): n is number => Number.isSafeInteger(n) && (n as number) >= 0;
 
+/** n is a power of two. Exact for every safe integer: `(n & (n - 1)) === 0` reads only the low 32 bits of n. */
+function isPowerOfTwo(n: number): boolean {
+  let k = 1;
+  while (k < n) k *= 2;
+  return k === n;
+}
+
 /** largest power of two strictly less than n (n >= 2) */
 function split(n: number): number {
   let k = 1;
@@ -101,7 +108,7 @@ export function verifyConsistency(oldSize: number, oldRoot: string, newSize: num
   if (oldSize === newSize) return proofHex.length === 0 && oldRoot === newRoot;
   if (proofHex.length === 0) return false;
   const proof = proofHex.map((x) => Buffer.from(x, "hex"));
-  if ((oldSize & (oldSize - 1)) === 0) proof.unshift(Buffer.from(oldRoot, "hex"));
+  if (isPowerOfTwo(oldSize)) proof.unshift(Buffer.from(oldRoot, "hex"));
   let fn = oldSize - 1;
   let sn = newSize - 1;
   while (fn % 2 === 1) {

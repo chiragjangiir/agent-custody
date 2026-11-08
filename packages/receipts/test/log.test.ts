@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -70,6 +71,22 @@ describe("Merkle log", () => {
     expect(verifyConsistency(5, oldRoot, 9, rootOf(honest, 9), consistencyProof(honest, 4, 9))).toBe(false);
     expect(verifyConsistency(5, oldRoot, 9, rootOf(honest, 9), consistencyProof(honest, 5, 9).slice(1))).toBe(false);
     expect(verifyConsistency(5, oldRoot, 9, rootOf(honest, 9), [])).toBe(false);
+  });
+
+  it("an old size of 2^32 + 1 is not a power of two: an honest proof from it verifies", () => {
+    // `(n & (n - 1)) === 0` reads only the low 32 bits, so it took 2^32 + 1 for a power of two and refused this proof.
+    // With every leaf the same, a subtree's hash depends only on its size: the tree of 2^32 + 1 leaves is
+    // node(MTH(2^32), L), and its proof to 2^32 + 2 leaves is [L, L, MTH(2^32)].
+    const node = (l: Buffer, r: Buffer) => createHash("sha256").update(Buffer.from([1])).update(l).update(r).digest();
+    const L = leafHash("same");
+    let top = L;
+    for (let i = 0; i < 32; i++) top = node(top, top);
+    const [m, n] = [2 ** 32 + 1, 2 ** 32 + 2];
+    const oldRoot = node(top, L).toString("hex");
+    const newRoot = node(top, node(L, L)).toString("hex");
+    const proof = [L, L, top].map((b) => b.toString("hex"));
+    expect(verifyConsistency(m, oldRoot, n, newRoot, proof)).toBe(true);
+    expect(verifyConsistency(m, oldRoot, n, newRoot, [oldRoot, ...proof])).toBe(false);
   });
 
   it("a head of size 0, old or new, has only the empty tree's root, as the Python verifier requires", () => {

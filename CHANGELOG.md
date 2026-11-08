@@ -2,6 +2,11 @@
 
 All three packages, `@agent-custody/receipts`, `@agent-custody/state`, and `agent-custody` on PyPI, move in lockstep. The receipt format has stayed at v0.2 throughout; every addition to it is an optional field, so earlier receipts and the published conformance vectors remain valid.
 
+## Unreleased
+
+- **Differential fuzzing ties the Lean model to the three Merkle verifiers people run.** Before, only the 7 leaves of `merkle.json` linked the model in `spec/lean` to the hand-written checks. `spec/lean/fuzz/merkle.ts` makes trees of 0 to 300 random leaves, plus trees of up to 2^53 − 1 identical leaves, with honest inclusion and consistency proofs and changes to each (another leaf, index, size or root, a short or long proof, uppercase hex, a 31-byte leaf). It then asks four verifiers for a verdict on each case: the model, through the new `lake exe oracle`, `log.ts`, the WebCrypto copy in `verify-web.ts`, and the Python `agent_custody.verify`. It fails on any disagreement and on any honest proof refused. The `lean` workflow runs it with a fixed seed and with a random one, runs when `verify-web.ts` or `verify.py` changes, and has a 10-minute timeout.
+- **Fix: a consistency proof from an old size such as 2^32 + 1 was refused by both TypeScript verifiers.** Their power-of-two test, `(oldSize & (oldSize - 1)) === 0`, read only the low 32 bits of the size, so every size past 2^32 whose low 32 bits are zero or a power of two counted as one, and an honest proof from it failed. Python got it right. `log.ts` and `verify-web.ts` now test the whole size, and the Lean model drops the `% 2^32` that copied the old test; one line of its proofs changes with it. Only a log of more than 2^32 leaves could meet the bug. The fuzzer found it.
+
 ## 0.15.0 — 2026-11-08
 
 - **Every npm dependency is pinned to one exact version.** 0.14.0 pinned `@cedar-policy/cedar-wasm` after its broken 4.14.1 publish; the same now holds for every entry in the `dependencies` and `devDependencies` of the receipts, state, and site packages, which name the version `bun.lock` resolves, with no caret, because the image builds install the packed package with npm, which resolves a range at build time. Nothing installed changed; the lockfile records the new range strings and re-hoists the `pg-types` tree at the same versions. Peer ranges are unchanged.

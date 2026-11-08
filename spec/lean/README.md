@@ -1,6 +1,6 @@
 # A Lean 4 specification of the verifier
 
-This is a model of the verifier's core in [Lean 4](https://lean-lang.org), with machine-checked proofs. It is not shipped. The TypeScript and Python verifiers stay the ones people run. The model states the acceptance rule precisely. It also checks the conformance vectors as a third implementation, beside those two verifiers.
+This is a model of the verifier's core in [Lean 4](https://lean-lang.org), with machine-checked proofs. It is not shipped. The TypeScript and Python verifiers stay the ones people run. The model states the acceptance rule precisely. It also checks the conformance vectors as a third implementation, beside those two verifiers, and a differential fuzzer checks that it gives the same verdict as each of them on tens of thousands of generated proofs.
 
 Tracking issue: #224.
 
@@ -38,7 +38,7 @@ Each theorem depends only on Lean's standard axioms: `propext`, `Classical.choic
 
 - **One assumption: `NodeCollisionFree`.** Two node inputs, `0x01 ‖ left ‖ right` with 32-byte children, never have the same SHA-256 digest. `nodeCollisionFree_of_sha256` derives it from two facts about SHA-256: it has no collision on 65-byte inputs, and it returns 32 bytes. `lake exe vectors` checks the second; the first is the usual trust in SHA-256. The width is what makes this a collision. On byte arrays of any width, `sha256(0x01 ‖ left ‖ right)` keeps its preimage when the boundary between the children moves. So the model, like `log.ts` and the Python verifier, refuses before the loop any proof hash that is not 64 lowercase hex digits, any root that is not 64 lowercase hex digits, and any leaf that is not 32 bytes.
 - **Sizes and indices are integers.** The model takes natural numbers. `log.ts` works on JavaScript numbers, so before its loops it refuses any index or size that is not a non-negative safe integer (`Number.isSafeInteger`). Without that check, the loops halve with floor and a fraction walks a real path: leaf 2's proof also passed at index 2.5. Vectors cover it, and `lake exe vectors` requires a case whose size is not a natural number to expect a refusal.
-- **Sizes below 2^53.** `log.ts` works on JavaScript numbers, which are exact up to 2^53. Its power-of-two test `(oldSize & (oldSize - 1)) === 0` works on the low 32 bits of each side, and the model computes it the same way. That makes the model and `log.ts` agree for every integer size below 2^53. It also means that, from 2^32 leaves, `log.ts` can take a size such as 2^32 + 1 for a power of two. Then it refuses an honest proof. That is a completeness gap, not a soundness one: the soundness theorem holds whichever way the test goes.
+- **Sizes below 2^53.** `log.ts` works on JavaScript numbers, which are exact up to 2^53, and refuses any size above 2^53 − 1. The model and the Python verifier take any natural number, so the three agree on sizes up to 2^53 − 1 only. Until the fuzzer below was added, the power-of-two test of `verifyConsistency` was `(oldSize & (oldSize - 1)) === 0` in both TypeScript verifiers. JavaScript's `&` works on the low 32 bits of each side, so an old size such as 2^32 + 1 counted as a power of two, and an honest proof from it was refused. The model copied that test. The fuzzer's cases past 2^32 found that Python disagreed. Now all three test the whole size: `isPowerOfTwo` in TypeScript, `&&&` on natural numbers here, `&` on Python integers. This was a completeness gap, not a soundness one: the soundness theorem held whichever way the test went.
 - **`subproof` within its domain.** `log.ts` calls `subproof` only with `0 < m < n`. Outside that range it would reach a range of one leaf and recurse forever. The model answers `[]` there instead.
 - **The tree size comes from the signed head.** An inclusion check does not pin the tree size by itself. For a leaf in the left subtree, the same proof verifies at size 6 against a 7-leaf root, and a 6-leaf list with that root exists. `verifyBundle` compares the proof's `treeSize` with the signed tree head.
 
@@ -69,9 +69,35 @@ lake exe vectors
 ./check-axioms.sh
 ```
 
-The `lean` workflow runs all three, and fails on any `sorry`.
+## Differential fuzzing
+
+The vectors hold 7 leaves. The fuzzer ties the model to the shipped verifiers on many more cases. Run this from this directory, with `bun` and `uv` installed:
+
+```bash
+bun fuzz/merkle.ts --seed random
+```
+
+[`fuzz/merkle.ts`](fuzz/merkle.ts) makes 200 trees of random leaves (`--trees`), of 0 to 300 leaves, with the sizes around powers of two first. For each tree it takes honest inclusion and consistency proofs from `log.ts` and changes each one in turn:
+- another leaf, a 31-byte or 33-byte leaf, another index or tree size, another root;
+- for consistency, another old or new root, old or new size, or the two heads swapped;
+- a proof that is too short or too long, has its first hash dropped, has the old root put in front, or has one hash replaced;
+- uppercase proof hashes, and an uppercase root.
+
+It adds the same cases for a tree whose leaves are all the same. There a subtree's hash depends only on its size, so the roots and proofs of trees of 2^32 − 1, 2^32, 2^32 + 1, 2^32 + 2 and 2^53 − 1 leaves cost a few hundred hashes. No case has a size above 2^53 − 1, the limit of `log.ts`.
+
+Each case goes to four verifiers:
+- the model, through `lake exe oracle` ([`Oracle.lean`](Oracle.lean)), which reads the cases as JSON lines and prints `accept` or `refuse` for each;
+- `verifyInclusion` and `verifyConsistency` of `packages/receipts/src/log.ts`;
+- the same functions of `packages/state/src/verify-web.ts`, the WebCrypto verifier of the browser page and the offline case files;
+- the Python verifier `agent_custody.verify`, through [`fuzz/merkle.py`](fuzz/merkle.py). It runs the same hex checks as a bundle check (`_hashes`, `HEX64`), then `root_from_inclusion` or `verify_consistency`.
+
+The run fails when two verifiers disagree on a case, or when any verifier refuses an honest proof. It prints the first 20 failing cases and the seed. `--seed <n>` replays a run.
+
+The `lean` workflow runs the build, the axioms check, the vectors, and the fuzzer twice: once with the fixed seed 20261108, and once with a random seed. It fails on any `sorry`.
 
 ## Still to do
+
+The fuzzer checks the hand-written code against the model on the cases it generates. It does not prove that they are the same program.
 
 The remaining items of #224:
 - completeness of the consistency check (each proof that `consistencyProof` makes verifies);

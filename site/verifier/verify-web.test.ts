@@ -1,4 +1,5 @@
 // The browser verifier must agree with the reference on every published vector. This is the conformance suite in use.
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -52,6 +53,18 @@ describe("browser verifier against the conformance vectors", () => {
     expect(await verifyInclusion(leaf, { ...proof, hashes: [wrap(proof.hashes[0]), ...proof.hashes.slice(1)] }, proof.root)).toBe(false);
     expect(await verifyInclusion(leaf, proof, wrap(proof.root))).toBe(false);
     expect(await verifyConsistency(0, wrap(merkle.roots[0]), 7, merkle.roots[7], [])).toBe(false);
+  });
+  it("an old size of 2^32 + 1 is not a power of two: an honest proof from it verifies", async () => {
+    // the same case as log.test.ts: with every leaf the same, the tree of 2^32 + 1 leaves is node(MTH(2^32), L)
+    const node = (l: Buffer, r: Buffer) => createHash("sha256").update(Buffer.from([1])).update(l).update(r).digest();
+    const L = createHash("sha256").update(Buffer.from([0])).update("same").digest();
+    let top = L;
+    for (let i = 0; i < 32; i++) top = node(top, top);
+    const oldRoot = node(top, L).toString("hex");
+    const newRoot = node(top, node(L, L)).toString("hex");
+    const proof = [L, L, top].map((b) => b.toString("hex"));
+    expect(await verifyConsistency(2 ** 32 + 1, oldRoot, 2 ** 32 + 2, newRoot, proof)).toBe(true);
+    expect(await verifyConsistency(2 ** 32 + 1, oldRoot, 2 ** 32 + 2, newRoot, [oldRoot, ...proof])).toBe(false);
   });
   it("canonical JSON, digests, DSSE", async () => {
     for (const v of canonical.values) { expect(canonicalize(v.value)).toBe(v.canonical); expect(await digestOf(v.value)).toBe(v.digest); }
