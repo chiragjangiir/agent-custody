@@ -16,8 +16,8 @@ services:
     build:
       context: .
       args:
-        AGENT_CUSTODY_VERSION: ${AGENT_CUSTODY_VERSION:-0.14.0}
-    image: ghcr.io/svayatta/agent-custody-log:${AGENT_CUSTODY_VERSION:-0.14.0}
+        AGENT_CUSTODY_VERSION: ${AGENT_CUSTODY_VERSION:-0.15.0}
+    image: ghcr.io/svayatta/agent-custody-log:${AGENT_CUSTODY_VERSION:-0.15.0}
     restart: unless-stopped
     environment:
       ROLE: signer
@@ -41,8 +41,8 @@ services:
     build:
       context: .
       args:
-        AGENT_CUSTODY_VERSION: ${AGENT_CUSTODY_VERSION:-0.14.0}
-    image: ghcr.io/svayatta/agent-custody-log:${AGENT_CUSTODY_VERSION:-0.14.0}
+        AGENT_CUSTODY_VERSION: ${AGENT_CUSTODY_VERSION:-0.15.0}
+    image: ghcr.io/svayatta/agent-custody-log:${AGENT_CUSTODY_VERSION:-0.15.0}
     restart: unless-stopped
     env_file:
       - path: .env
@@ -90,7 +90,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    image: ghcr.io/svayatta/agent-custody-log:${AGENT_CUSTODY_VERSION:-0.14.0}
+    image: ghcr.io/svayatta/agent-custody-log:${AGENT_CUSTODY_VERSION:-0.15.0}
     restart: unless-stopped
     env_file:
       - path: .env
@@ -186,7 +186,7 @@ services:
   log-file:
     # The file-backed reference server alone: one tenant, no Postgres. What deploy/ was before phase 2.
     profiles: ["file"]
-    image: ghcr.io/svayatta/agent-custody-log:${AGENT_CUSTODY_VERSION:-0.14.0}
+    image: ghcr.io/svayatta/agent-custody-log:${AGENT_CUSTODY_VERSION:-0.15.0}
     restart: unless-stopped
     env_file:
       - path: .env

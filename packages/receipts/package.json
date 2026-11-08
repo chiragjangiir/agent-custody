@@ -1,6 +1,6 @@
 {
   "name": "@agent-custody/receipts",
-  "version": "0.14.0",
+  "version": "0.15.0",
   "mcpName": "io.github.svayatta/agent-custody",
   "description": "Chain of custody for AI agents: signed, independently verifiable receipts for tool calls. MCP gateway + Cedar or Rego policy + Merkle transparency log",
   "license": "Apache-2.0",
