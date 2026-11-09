@@ -2,6 +2,10 @@
 
 All three packages, `@agent-custody/receipts`, `@agent-custody/state`, and `agent-custody` on PyPI, move in lockstep. The receipt format has stayed at v0.2 throughout; every addition to it is an optional field, so earlier receipts and the published conformance vectors remain valid.
 
+## Unreleased
+
+- **Review rules for Cursor Bugbot.** `.cursor/BUGBOT.md` tells the automatic pull request reviewer what this repository treats as a bug: fail-open paths, weakened security invariants, verifiers out of step, vectors regenerated without cause, secrets, network calls without a timeout or in tests, money as a float, unescaped portal output, and caches that can mix callers. It also lists the gaps to flag (no test, stale docs, no CHANGELOG entry) and what not to flag. `CONTRIBUTING.md` says to keep it in step.
+
 ## 0.16.2 — 2026-11-09
 
 - **Test coverage in CI, and a pull request template.** `bun run coverage` runs the receipts and state tests with v8 coverage (`@vitest/coverage-v8` 5.0.0) and the Python tests with `pytest-cov`, then prints the totals per package and the least covered files. The new `coverage` job in the test workflow runs it on every pull request and on main, writes the summary to the job summary, and uploads the HTML reports as an artifact. It is not a required check. Coverage counts only code that runs in the test process, so the CLI, which tests run as a child process, shows as uncovered. Every pull request now uses `.github/pull_request_template.md` (what and why, how it was tested, a checklist of the repository's rules, notes for the reviewer), and the `pr-template` workflow fails while a section is missing or empty. Dependabot's pull requests pass it, so it can be a required check. `pytest-cov` 6.0.0 is pinned in the Python `test` extra, so `uv.lock` owns its tree, and a failed artifact upload never fails the coverage job.

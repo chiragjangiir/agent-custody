@@ -115,6 +115,7 @@ Web pages and the hosted log:
 ## Pull requests
 
 - Every pull request uses `.github/pull_request_template.md`. The `pr-template` workflow fails while a section of the description is missing or empty. GitHub fills the template in when the pull request is opened in the browser; with `gh pr create`, copy its sections into `--body`.
+- Cursor Bugbot reviews each pull request with the rules in `.cursor/BUGBOT.md`. When a rule here changes in a way a reviewer should check, change that file in the same pull request.
 
 ## Deploy and images
 
