@@ -29,8 +29,10 @@ export type Provenance = "attested" | "observed" | "claimed";
  *             or browser could neither skip nor forge it, and has no grant unless it presented one
  *  - egress:  a forward proxy in a locked-down agent's network path, for connections that do not go to the gateway; it
  *             saw where traffic went and how much, never what was sent. Each receipt is an observed bypass of the gateway
+ *  - guardian: an OWASP ACS Guardian outside the agent's process. The decision is its own and signed with its key; the
+ *             call is the agent's report. The agent could skip asking or ignore the answer, so nothing here was enforced
  */
-export type IssuerKind = "gateway" | "sdk" | "door" | "egress";
+export type IssuerKind = "gateway" | "sdk" | "door" | "egress" | "guardian";
 
 export interface FactRecord {
   tool: string;

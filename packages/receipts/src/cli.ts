@@ -6,7 +6,7 @@ import { isProviderAttestation } from "./upstream.ts";
 import { parseArgs } from "node:util";
 import { closeSync, constants as fsConstants, existsSync, fchmodSync, openSync, readFileSync, readdirSync, writeFileSync, writeSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { loadConfig, loadDoorConfig, loadEgressConfig, loadSdkConfig, type A2aUpstreamConfig } from "./config.ts";
+import { loadAcsGuardianConfig, loadConfig, loadDoorConfig, loadEgressConfig, loadSdkConfig, type A2aUpstreamConfig } from "./config.ts";
 import { dsseVerify, generateKeyPair, loadPrivateKey, loadPublicKey, writeKeyPair } from "./crypto.ts";
 import type { Envelope } from "./crypto.ts";
 import { createDelegation, decodeDelegation, delegateFrom, grantDigest } from "./delegation.ts";
@@ -24,6 +24,7 @@ import { serveHttp } from "./gateway-http.ts";
 import { createDoorHost, serveDoor } from "./door.ts";
 import { createEgressHost, serveEgress } from "./egress.ts";
 import { draftEgressPolicy } from "./egress-draft.ts";
+import { createAcsGuardian } from "./acs.ts";
 import { serveA2a } from "./a2a.ts";
 import { PortalStore, sendFollowUps, servePortal, type MailOptions, type OAuthOptions, type Role, type StripeOptions } from "./portal.ts";
 import type { OidcConfig, SamlConfig } from "./sso.ts";
@@ -114,6 +115,9 @@ const USAGE = `agent-custody <command>
                                                    a first egress policy from observe-mode receipts: one permit per verified agent and scheme over the
                                                    host:port destinations the witness relayed for it, each with its count and first and last time. It permits
                                                    whatever the agents did, bad destinations included: review it. Receipts that do not verify are skipped
+  acs     --config <acs.json>                      an OWASP Agent Control Standard Guardian, one document at a time: reads a JSON-RPC
+                                                   steps/toolCallRequest or steps/toolCallResult (or a batch) on stdin, answers allow or
+                                                   deny by the Cedar policy on stdout, and writes a signed receipt for each decision
   init claude-code [--dir <dir>] [--user] [--enforce] [--log-url <url> [--log-id <id>] [--log-token-env NAME] [--log-key <pub>]]
                                                    one command for your own Claude Code sessions: an agent key, sdk.json in observe mode, a starter deny
                                                    policy, and the three hooks in .claude/settings.local.json (--user: ~/.claude/settings.json). Safe to run twice
@@ -387,6 +391,24 @@ async function main(argv: string[]): Promise<number> {
       await host.close();
       await running.close();
       return 0;
+    }
+    case "acs": {
+      const { values } = parseArgs({ args: rest, options: { config: { type: "string" } } });
+      if (!values.config) throw new Error("acs needs --config");
+      const guardian = createAcsGuardian(loadAcsGuardianConfig(values.config));
+      const chunks: Buffer[] = [];
+      for await (const c of process.stdin) chunks.push(c as Buffer);
+      let message: unknown;
+      try {
+        message = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+      } catch (e) {
+        console.log(JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32700, message: `parse error: ${e instanceof Error ? e.message : String(e)}` } }, null, 2));
+        return 1;
+      }
+      const answer = await guardian.handle(message);
+      console.log(JSON.stringify(answer, null, 2));
+      // a deny is a decision, so 0; an error (no decision, including a receipt that could not be written) is 1
+      return (Array.isArray(answer) ? answer : [answer]).some((a) => "error" in a) ? 1 : 0;
     }
     case "init": {
       const [target, ...args] = rest;

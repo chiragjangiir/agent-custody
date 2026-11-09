@@ -360,6 +360,33 @@ export function loadDoorConfig(path: string): DoorConfig {
   };
 }
 
+/**
+ * An ACS Guardian: answers OWASP Agent Control Standard `steps/toolCallRequest` and `steps/toolCallResult` with the
+ * Cedar policy's decision, and receipts each decision. The agent ids on the wire are claimed: nothing checks them.
+ */
+export const AcsGuardianConfigSchema = z.object({
+  identity: z.object({ keyFile: z.string() }),
+  policyFile: z.string(),
+  receiptsDir: z.string(),
+  logFile: z.string().optional(),
+  log: LogSchema.optional(),
+}).refine(hasOneLog, oneLog);
+export type AcsGuardianConfig = z.infer<typeof AcsGuardianConfigSchema>;
+
+export function loadAcsGuardianConfig(path: string): AcsGuardianConfig {
+  const cfg = AcsGuardianConfigSchema.parse(JSON.parse(readFileSync(path, "utf8")));
+  const base = dirname(resolve(path));
+  const r = (p: string) => resolve(base, p);
+  return {
+    ...cfg,
+    identity: { keyFile: r(cfg.identity.keyFile) },
+    policyFile: r(cfg.policyFile),
+    receiptsDir: r(cfg.receiptsDir),
+    ...(cfg.logFile ? { logFile: r(cfg.logFile) } : {}),
+    ...(cfg.log?.keys ? { log: { ...cfg.log, keys: cfg.log.keys.map(r) } } : {}),
+  };
+}
+
 export const SdkConfigSchema = z.object({
   /** identity the receipts will name; nothing checks it, so it is recorded as claimed */
   agentId: z.string().min(1),

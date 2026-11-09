@@ -79,7 +79,7 @@ A refused call's `execution` row carries the reason the receipt records, for exa
 | --- | --- | --- |
 | receipt signature (issuer key) | the bundle's envelope was signed by a key you trust as an issuer and has not changed since | edited receipt, or an issuer key you do not trust |
 | receipt payload type | the payload is an in-toto Statement with this project's predicate type | wrong file, or a different envelope replayed as a receipt |
-| issuer kind is known | the receipt says whether a gateway, a door, an egress witness, or an SDK produced it; the detail shows which, and the framework | a predicate this verifier does not understand |
+| issuer kind is known | the receipt says whether a gateway, a door, an egress witness, an ACS Guardian, or an SDK produced it; the detail shows which, and the framework | a predicate this verifier does not understand |
 | issuer keyid matches signer | the receipt's own claim of who signed it matches the actual signature | mixed-up or forged predicate |
 | gateway receipt carries a delegation | gateway receipts always embed the signed grant they enforced | an SDK receipt relabelled as gateway |
 | gateway receipt carries a policy decision | gateway receipts always record the Cedar decision | same |
@@ -89,6 +89,8 @@ A refused call's `execution` row carries the reason the receipt records, for exa
 | egress open committed before relaying | a relayed connection carries the authorization the witness committed to the log before any byte moved | a bypass with no record until it closed, or a receipt re-signed to drop the commitment |
 | egress peer matches the destination | for an IP literal, the witness connected to that very address; for a host name, to a public address | a permit for a public name turned into a request to the metadata service or the private network, or a receipt re-signed to show another peer |
 | egress relayed only for a checked agent | a connection that was relayed (executed, failed, or error) names an agent whose proxy credential the witness checked (`observed`) | an issuer that relayed for an unidentified agent, or a receipt re-signed to hide who it was |
+| guardian receipt carries a policy decision | an ACS Guardian decides every step by policy | a record-only receipt relabelled as guardian |
+| guardian decided, executed nothing | an allowed step is `withheld` (a Guardian forwards nothing) and a denied one is `denied`; the agent asked, reports the call itself, and is trusted to honor the answer ([the ACS Guardian](acs.md)) | a guardian receipt re-signed to claim the call was executed |
 | delegation signature (principal key) | the embedded grant was signed by a key you trust as a principal | a grant the principal never issued |
 | delegation chain to the principal | only when the grant embeds a parent: every link is signed by the key its parent names, holds no scope its parent lacks, sits inside its parent's window, and names the same principal, up to three delegations deep | a sub-agent given more than its delegator had, a link signed by the wrong key, a chain that never reaches a trusted principal |
 | delegation binds principal and agent | the grant names the same principal and agent the receipt names, and the principal keyid matches | a valid grant for someone else, spliced in |

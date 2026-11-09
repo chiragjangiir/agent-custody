@@ -784,13 +784,20 @@ def _verify(bundle: Any, trust: Trust, report: Report, *, log, log_id, require_s
     forwarded = status in FORWARDED
 
     kind = p["issuer"].get("kind")
-    add("issuer kind is known", kind in ("gateway", "sdk", "door", "egress"), str(kind))
+    add("issuer kind is known", kind in ("gateway", "sdk", "door", "egress", "guardian"), str(kind))
     add("issuer keyid matches signer", p["issuer"]["keyid"] in signers, p["issuer"]["keyid"][:12])
     if kind == "gateway":
         add("gateway receipt carries a delegation", "delegation" in p)
         add("gateway receipt carries a policy decision", isinstance(p.get("policy"), dict))
     if kind == "door":
         add("door receipt carries a policy decision", isinstance(p.get("policy"), dict))
+    if kind == "guardian":
+        # a Guardian decides and carries out nothing: an allow is withheld (nothing forwarded), a deny is denied
+        policy = p.get("policy") if isinstance(p.get("policy"), dict) else None
+        add("guardian receipt carries a policy decision", policy is not None)
+        decision = policy.get("decision") if policy else None
+        decided = decision == "deny" if status == "denied" else status == "withheld" and decision == "allow"
+        add("guardian decided, executed nothing", decided, f"{decision}; the agent asked, reports the call itself, and is trusted to honor the answer" if decided else f"the receipt says {status} with a policy {decision or 'absent'}")
     if kind == "egress":
         # where a connection around the gateway went and how much, never what was sent; the agent is only as good as
         # the proxy credential the witness checked

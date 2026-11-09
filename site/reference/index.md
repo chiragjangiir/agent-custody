@@ -8,6 +8,7 @@ Every feature of agent-custody, how to use it, and the exact request and respons
 | --- | --- | --- | --- |
 | Gateway | `@agent-custody/receipts` | a process between the agent and its tools: checks the grant and the policy, forwards or denies, issues a receipt | [gateway](./gateway) |
 | Egress witness | `@agent-custody/receipts` | a forward proxy for a locked-down agent's calls around the gateway: identifies the agent by proxy credential, decides by policy per destination, relays or refuses, issues a receipt; never sees payloads | [egress](./egress) |
+| ACS Guardian | `@agent-custody/receipts` | an OWASP Agent Control Standard Guardian for `steps/toolCallRequest` and `steps/toolCallResult`: decides by Cedar policy, answers allow or deny, and issues a receipt for each decision; the agent can skip it, so it proves the decision, not enforcement | [acs](./acs) |
 | Door | `@agent-custody/receipts` | a reverse proxy in front of your own site or API: classifies every arrival, decides by policy per route, relays or refuses, issues a receipt | [door](./door) |
 | SDK | `@agent-custody/receipts` | the same issuer inside the agent's process, for tools that are plain functions; adapters for the frameworks | [TypeScript SDK](./sdk-typescript) |
 | Sidecar | `@agent-custody/receipts` | the SDK as a local HTTP API, for agents in any language | [sidecar](./sidecar) |

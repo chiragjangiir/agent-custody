@@ -190,7 +190,7 @@ export function verifyBundle(bundle: ReceiptBundle, opts: VerifyOptions): Verify
   if (!add("structural parts in clear", !broken, broken ?? undefined)) return done(null);
   const p = st.predicate;
 
-  add("issuer kind is known", p.issuer.kind === "gateway" || p.issuer.kind === "sdk" || p.issuer.kind === "door" || p.issuer.kind === "egress", `${p.issuer.kind}${p.issuer.framework ? ` / ${p.issuer.framework}` : ""}`);
+  add("issuer kind is known", p.issuer.kind === "gateway" || p.issuer.kind === "sdk" || p.issuer.kind === "door" || p.issuer.kind === "egress" || p.issuer.kind === "guardian", `${p.issuer.kind}${p.issuer.framework ? ` / ${p.issuer.framework}` : ""}`);
   add("issuer keyid matches signer", p.issuer.keyid === sig.keyid);
   if (opts.requireStrict) {
     add("strict mode in force", p.issuer.kind === "gateway" && p.issuer.strict === true, p.issuer.strict === true ? undefined : "the issuer does not say it ran in strict mode");
@@ -234,6 +234,13 @@ export function verifyBundle(bundle: ReceiptBundle, opts: VerifyOptions): Verify
     const peer = p.execution.status === "executed" || p.execution.status === "failed" ? (p.execution.result as { peer?: unknown } | null)?.peer : undefined;
     const peerOk = typeof peer === "string" && (literal ? sameAddress(peer, host) : !internalAddress(peer));
     add("egress peer matches the destination", !reached || peerOk, !reached ? "no connection was made" : literal ? `${host}, an address the policy named, reached ${typeof peer === "string" ? peer : "no recorded peer"}` : `${host} reached ${typeof peer === "string" ? peer : "no recorded peer"}${peerOk ? ", a public address" : ""}`);
+  }
+
+  // A Guardian decides and carries out nothing: an allow is withheld (nothing forwarded), a deny is denied.
+  if (p.issuer.kind === "guardian") {
+    add("guardian receipt carries a policy decision", !!p.policy && typeof p.policy === "object" && !Array.isArray(p.policy));
+    const decided = p.execution.status === "denied" ? p.policy?.decision === "deny" : p.execution.status === "withheld" && p.policy?.decision === "allow";
+    add("guardian decided, executed nothing", decided, decided ? `${p.policy?.decision}; the agent asked, reports the call itself, and is trusted to honor the answer` : `the receipt says ${p.execution.status} with a policy ${p.policy?.decision ?? "absent"}`);
   }
 
   if (p.delegation) {
@@ -556,6 +563,7 @@ export function auditExtends(older: Envelope, newer: Envelope, proof: string[], 
 const ISSUER_NOTE: Record<string, string> = {
   gateway: "enforced outside the agent's process; the agent could neither skip nor forge this receipt",
   sdk: "self-reported by the agent's own process; tamper-evident after issue, but nothing here was enforced outside the agent",
+  guardian: "decided by an ACS Guardian outside the agent's process and signed with its own key, so the decision is attributable to it; the call is the agent's own report, and the agent could skip the Guardian or ignore its answer",
   egress: "observed by a forward proxy in the agent's network path, for a connection that went around the gateway: where it went and how much, never what was sent; the agent is known only by the proxy credential the witness checked, and a connection that skipped the proxy (no lockdown) leaves no receipt at all",
 };
 
@@ -587,7 +595,7 @@ export function formatReport(r: VerifyResult): string {
   if (p.authorization) {
     const committed = r.checks.filter((c) => c.name.startsWith("authorization ")).every((c) => c.ok);
     row("authorization", "observed", committed ? `committed to the log as leaf ${p.authorization.inclusion.leafIndex}, before the call was forwarded` : "carried, but its checks FAILED");
-  } else if (p.execution.status === "withheld") row("authorization", "observed", "the log would not commit it; the call was not forwarded");
+  } else if (p.execution.status === "withheld" && p.issuer.kind !== "guardian") row("authorization", "observed", "the log would not commit it; the call was not forwarded");
   if (p.approval) row("approval", p.approval.provenance, `${p.approval.status}; ${p.approval.requiredApprovers} approver(s) required${p.approval.consumedAt ? `; consumed ${p.approval.consumedAt}` : ""}${typeof p.approval.reason === "string" ? `; ${p.approval.reason}` : ""}`);
   const upstreamCheck = r.checks.find((c) => c.name === "upstream signature (upstream key)" || c.name === "upstream signature (provider secret)");
   const hasUpstream = (p.execution.status === "executed" || p.execution.status === "failed") && !!p.execution.upstream;

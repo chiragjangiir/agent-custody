@@ -27,6 +27,7 @@ import { buildDoorFixture, startOrigin } from "./door-fixture.ts";
 import { createEgressHost, serveEgress } from "../src/egress.ts";
 import { loadEgressConfig } from "../src/config.ts";
 import { EGRESS_AGENT, EGRESS_SECRET, buildEgressFixture, connectThrough, proxyAuth, startEcho } from "./egress-fixture.ts";
+import { ACS_RECEIPT_KEY, createAcsGuardian, type AcsResponse } from "../src/acs.ts";
 
 const out = join(import.meta.dirname, "..", "vectors");
 const decode = (b: ReceiptBundle) => JSON.parse(Buffer.from(b.envelope.payload, "base64").toString()) as ReceiptStatement;
@@ -617,6 +618,26 @@ try {
     }), ...E, log: elog });
     addCase({ name: "resigned-egress-destination-mismatch", description: "The refused provider call re-signed to name another destination than the one the witness observed: `egress destination observed` fails.", bundle: resigned(refusedProvider, egressKey, (st) => { st.predicate.tool = { name: "registry.npmjs.org:443", provenance: "observed" }; }), ...E, log: elog });
   } finally { await ehost.close(); await witness.close(); await echo.close(); }
+}
+
+// ---- an OWASP ACS Guardian: decisions on ACS hooks, issuer kind "guardian" ----
+{
+  const gdir = mkdtempSync(join(tmpdir(), "vectors-acs-"));
+  const gkey = generateKeyPair();
+  const gfiles = writeApprovalKeyPair(gkey, join(gdir, "keys"), "guardian");
+  key("guardian", gfiles.pubFile);
+  const acsDir = join(import.meta.dirname, "..", "examples", "acs");
+  const guardian = createAcsGuardian({ identity: { keyFile: gfiles.keyFile }, policyFile: join(acsDir, "policy.cedar"), receiptsDir: join(gdir, "receipts"), logFile: join(gdir, "log.jsonl") });
+  const receiptOf = (r: AcsResponse | AcsResponse[]) => ((r as unknown as { result: { policy_data: Record<string, { receipt: ReceiptBundle }> } }).result.policy_data[ACS_RECEIPT_KEY]!.receipt);
+  const sample = JSON.parse(readFileSync(join(acsDir, "tool-call-request.json"), "utf8")) as { params: Record<string, unknown> };
+  const allowed = receiptOf(await guardian.handle(sample));
+  const denied = receiptOf(await guardian.handle({ ...sample, id: "2", params: { ...sample.params, request_id: randomUUID(), payload: { tool: { name: "file_read" }, arguments: { path: { value: "/etc/passwd" } } } } }));
+  const G = { issuerKeys: ["guardian"], principalKeys: [] as string[], logKeys: [] as string[] };
+  const alog = logLines(join(gdir, "log.jsonl"));
+  addCase({ name: "guardian-acs-allow", description: "The ACS README's sample steps/toolCallRequest (file_read /reports/q3-summary.md), decided by an ACS Guardian: issuer kind guardian, agent, tool, and arguments claimed (the agent's own report), policy allow, execution withheld (a Guardian forwards nothing). The acsStep fact carries the ACS request_hash and chain_hash. Verifies with the Guardian's key alone.", bundle: allowed, ...G, log: alog });
+  addCase({ name: "guardian-acs-deny", description: "The same session asks to read /etc/passwd; no permit matches, so the Guardian denies and receipts the denial.", bundle: denied, ...G, log: alog });
+  addCase({ name: "resigned-guardian-allow-as-executed", description: "The allow re-signed as if the Guardian had executed the call. A Guardian carries out nothing, so `guardian decided, executed nothing` fails.", bundle: resigned(allowed, gkey, (st) => { st.predicate.execution = { status: "executed", result: null, resultDigest: digestOf(null), provenance: "claimed" }; }), ...G, log: alog });
+  addCase({ name: "resigned-guardian-no-policy", description: "The denial re-signed with its policy decision removed: `guardian receipt carries a policy decision` fails.", bundle: resigned(denied, gkey, (st) => { st.predicate.policy = null; }), ...G, log: alog });
 }
 
 writeFileSync(join(out, "receipts.json"), JSON.stringify({ version: "0.2", generated: new Date().toISOString(), note: "Each case: verify `bundle` with the named keys (see `keys`) and, when `log` is not null, a copy of the log whose lines are these leaves. `expected.failing` lists the check names that must fail; `expected.ok` is true only when it is empty.", keys, cases }, null, 2) + "\n");

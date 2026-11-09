@@ -1,0 +1,6 @@
+{
+  "identity": { "keyFile": "keys/guardian.key" },
+  "policyFile": "policy.cedar",
+  "receiptsDir": "receipts",
+  "logFile": "log.jsonl"
+}
