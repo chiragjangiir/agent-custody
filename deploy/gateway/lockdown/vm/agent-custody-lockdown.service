@@ -1,0 +1,28 @@
+# Loads agent-lockdown.nft at boot, and nothing else. The agent's drop-in (agent-lockdown.conf) requires this unit, so an
+# agent never starts without its firewall table: a load that fails (a syntax error, an agent user that does not resolve)
+# keeps the agent down.
+#
+#   sudo install -m 0644 agent-custody-lockdown.service /etc/systemd/system/
+#   sudo systemctl enable --now agent-custody-lockdown
+#
+# Do not load the table through nftables.service instead. That service runs /etc/nftables.conf, which on Debian and
+# Ubuntu starts with `flush ruleset` and so deletes every other table on the host (docker's, ufw's) when it starts.
+# This unit replaces only its own table. It runs after nftables.service, and a stop or restart of that service stops or
+# restarts this unit and so the agent (PartOf). A start or a reload of nftables.service flushes the table too, without
+# reaching this unit: where nftables.service is installed, also install nftables-lockdown.conf, its drop-in that loads
+# the table again after each one.
+[Unit]
+Description=agent-custody egress lockdown for agent users (nftables)
+# the agent users in the file may come from a directory service (SSSD, LDAP)
+After=nftables.service nss-user-lookup.target
+PartOf=nftables.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/nft -f /etc/agent-custody/agent-lockdown.nft
+# reloads the file in place: the table is replaced in one transaction, with no moment unprotected
+ExecReload=/usr/sbin/nft -f /etc/agent-custody/agent-lockdown.nft
+
+[Install]
+WantedBy=multi-user.target

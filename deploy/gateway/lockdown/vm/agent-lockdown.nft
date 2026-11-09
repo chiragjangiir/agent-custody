@@ -1,0 +1,66 @@
+#!/usr/sbin/nft -f
+# Egress lockdown for agents on a Linux VM or bare metal, each running as its own Unix user. Every packet that a socket
+# owned by an agent user sends may go only to the gateway (8790) and the egress witness (8791). Everything else is
+# logged and refused. Packets sent by every other user, including the gateway and the witness, are not touched, so the
+# only ways out for an agent are a tool call through the gateway (which holds the credentials) and a connection through
+# the witness (which decides it by policy and receipts it).
+#
+#   sudo useradd --system --home /var/lib/agent --create-home --shell /usr/sbin/nologin agent
+#   sudo install -D -m 0644 agent-lockdown.nft /etc/agent-custody/agent-lockdown.nft    # then edit the defines below
+#   sudo nft -c -f /etc/agent-custody/agent-lockdown.nft && sudo nft -f /etc/agent-custody/agent-lockdown.nft
+#   sudo ./check-lockdown.sh
+#
+# To load it at boot, install agent-custody-lockdown.service beside this file and enable it, and where nftables.service
+# is installed, its drop-in nftables-lockdown.conf, which loads the table again after that service flushes the ruleset. Loading this file, by hand or
+# by that unit, replaces only this table; other tables (ufw, docker, your own) are left alone. Do not add it to
+# /etc/nftables.conf and enable nftables.service instead: on Debian and Ubuntu that file starts with `flush ruleset`, so
+# every start of that service deletes every other table on the host.
+#
+# The rule matches the user that owns the socket (meta skuid), so it covers everything the agent user runs: its service,
+# a cron job, a shell. It cannot cover a process that changes user. Give the agent user no sudo, no setuid helpers that
+# connect for it, and no membership of the docker group (the docker socket starts containers that are not this user).
+# A local daemon that makes connections on request (a proxy, a mail relay) is another way out: keep the agent user off
+# its socket. The systemd drop-in beside this file (agent-lockdown.conf) adds NoNewPrivileges for the agent's service.
+#
+# DNS is closed. The agent reaches the gateway and the witness by address, and the witness resolves every other name
+# itself, so the agent needs no resolver, and a resolver that forwards to the internet would carry data in its queries
+# that the witness does not see. agent-lockdown.conf allows the same: no resolver. If your agent must resolve names,
+# uncomment the resolver lines below and add the same address to IPAddressAllow= in the drop-in; keep it to a resolver
+# on loopback (127.0.0.53, the systemd-resolved stub), since that allow opens every port on it. systemd-resolved also
+# answers on a Unix socket that neither firewall sees (nss-resolve uses it), so this closes DNS over IP only.
+
+# The agent users, by name or uid. Names are resolved when the file is loaded, so a user from a directory service
+# (LDAP, SSSD) that is not yet available at boot should be given by uid.
+define AGENT_USERS = { agent }
+# Where the gateway and the witness listen. The shipped units bind both to loopback on this host. If they run on
+# another host, put that host's address here.
+define GATEWAY = 127.0.0.1
+define WITNESS = 127.0.0.1
+# Only for an agent that must resolve names: the resolver in /etc/resolv.conf (127.0.0.53 is the systemd-resolved stub).
+# define RESOLVERS = { 127.0.0.53 }
+
+# create the table if it is missing, so that the delete below never fails, then build it again from scratch
+table inet agent_custody_lockdown
+delete table inet agent_custody_lockdown
+
+# inet covers IPv4 and IPv6. The addresses above are IPv4, so every IPv6 packet from an agent falls through to the
+# refusal. If the gateway or the witness listens on IPv6, add ip6 rules like the ip ones.
+table inet agent_custody_lockdown {
+	chain output {
+		type filter hook output priority filter; policy accept;
+		meta skuid $AGENT_USERS jump agent
+	}
+
+	# Every packet the agent sends is checked, not only the first of a connection, so a connection that was open before
+	# this table was loaded is cut too. Replies come in on the input hook and are not affected.
+	chain agent {
+		ip daddr $GATEWAY tcp dport 8790 accept
+		ip daddr $WITNESS tcp dport 8791 accept
+		# ip daddr $RESOLVERS meta l4proto { udp, tcp } th dport 53 accept
+		# loopback is not exempt: a database or an admin port on 127.0.0.1 is as far out of bounds as the internet
+		limit rate 6/minute burst 10 packets log prefix "agent-custody lockdown: " level warn
+		# a reset (connection refused) or an ICMP error fails the agent's call at once, where a silent drop would hang it
+		meta l4proto tcp reject with tcp reset
+		reject with icmpx admin-prohibited
+	}
+}

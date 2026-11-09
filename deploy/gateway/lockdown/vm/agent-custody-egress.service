@@ -1,0 +1,53 @@
+# The egress witness on a plain VM, beside the gateway (../../agent-custody-gateway.service), for agents locked down by
+# agent-lockdown.nft and agent-lockdown.conf. It uses the same egress.json and egress-policy.cedar as the compose and
+# Kubernetes recipes: the unit mounts /etc/agent-custody/egress at /egress and its state directory at /data, the paths
+# in that config. It runs as a user of its own, so it cannot read the gateway's key or the credentials the gateway holds.
+#
+#   sudo useradd --system --home /var/lib/agent-custody-egress --create-home --shell /usr/sbin/nologin custody-egress
+#   sudo install -d /etc/agent-custody/egress && sudo cp ../config/egress.json ../config/egress-policy.cedar /etc/agent-custody/egress/
+#   sudo install -m 0600 /dev/null /etc/agent-custody/egress.env     # EGRESS_SECRET_RESEARCH_AGENT=<openssl rand -hex 32>
+#   sudo install -d -o custody-egress -g custody-egress /var/lib/agent-custody-egress/keys
+#   sudo -u custody-egress agent-custody keygen --dir /var/lib/agent-custody-egress/keys --name egress
+#   sudo systemctl enable --now agent-custody-egress
+#
+# Receipts are written to /var/lib/agent-custody-egress/receipts.
+[Unit]
+Description=agent-custody egress witness
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=custody-egress
+# only the agents' proxy secrets: the witness holds no tool credential
+EnvironmentFile=/etc/agent-custody/egress.env
+ExecStart=/usr/bin/env agent-custody egress --config /egress/egress.json --host 127.0.0.1 --port 8791
+Restart=on-failure
+RestartSec=5
+# SIGTERM receipts the open tunnels as witness-stopped before the witness exits
+TimeoutStopSec=30
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+BindReadOnlyPaths=/etc/agent-custody/egress:/egress
+BindPaths=/var/lib/agent-custody-egress:/data
+# The witness refuses internal addresses for a host name before it connects, but it dials an IP literal that the policy
+# names, and for that literal these lines are the only layer. They are the witness's own list (src/addresses.ts) less
+# loopback: this host's own network, the private and shared ranges, link-local (169.254.169.254, the metadata service on
+# most clouds), Oracle's metadata at 192.0.0.192, Alibaba's at 100.100.100.200, the benchmarking range, multicast, and
+# reserved space, for IPv4 and IPv6. Loopback stays open, because the agents reach the witness there: do not permit a
+# 127.0.0.0/8 literal in the policy. NAT64 (64:ff9b::/96) stays open too, since on an IPv6-only host with DNS64 all
+# public traffic goes there, so a NAT64 literal that wraps an internal IPv4 address is not covered: do not permit one.
+#
+# The witness resolves names through /etc/resolv.conf. Where that names the systemd-resolved stub, 127.0.0.53 (Ubuntu,
+# Amazon Linux 2023), the witness talks only to loopback, and resolved queries the VPC resolver from its own unit, which
+# these lines do not filter. Where it names the VPC resolver directly (169.254.169.253 or the VPC base + 2, such as
+# 10.0.0.2, on AWS; 169.254.169.254 on GCP), the witness can resolve nothing until you add IPAddressAllow= for that one
+# address. It opens every port there; on GCP that is also the metadata service. Azure's 168.63.129.16 is public and not
+# denied. Do the same for a log on one of these addresses.
+IPAddressDeny=0.0.0.0/8 10.0.0.0/8 100.64.0.0/10 169.254.0.0/16 172.16.0.0/12 192.0.0.0/24 192.168.0.0/16 198.18.0.0/15
+IPAddressDeny=224.0.0.0/4 240.0.0.0/4
+IPAddressDeny=fc00::/7 fe80::/10 ff00::/8 64:ff9b:1::/48
+
+[Install]
+WantedBy=multi-user.target

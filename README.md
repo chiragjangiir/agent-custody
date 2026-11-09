@@ -160,7 +160,7 @@ The gateway receipts the calls that go through it. An agent that holds a credent
 
 Each receipt is an observed bypass, not a record of what was done. A permitted host name is never dialled at an internal address such as the cloud metadata service.
 
-**Where it runs.** The witness runs anywhere Node 22 runs. Lockdown depends on the platform: `deploy/gateway/lockdown` ships it for Kubernetes (a NetworkPolicy) and docker compose (an internal network). On a VM, bare metal, or a cloud task, build the same default-deny egress with that platform's firewall. [Credential custody and lockdown](site/guide/credential-custody.md) shows how. [The egress witness](packages/receipts/docs/egress.md) has the config, the policy, and the receipt. Tutorial 41 runs it end to end.
+**Where it runs.** The witness runs anywhere Node 22 runs. Lockdown depends on the platform: `deploy/gateway/lockdown` ships it for Kubernetes (a NetworkPolicy), docker compose (an internal network), and a Linux VM or bare metal (an nftables rule on the agent's user and a systemd drop-in). On a cloud task, build the same default-deny egress with that platform's firewall. [Credential custody and lockdown](site/guide/credential-custody.md) shows how. [The egress witness](packages/receipts/docs/egress.md) has the config, the policy, and the receipt. Tutorial 41 runs it end to end.
 
 ## Advanced
 

@@ -7,12 +7,12 @@ The gateway holds an agent's tool credentials and receipts every call made throu
 - relays the connection or refuses it;
 - signs a receipt either way, with `issuer.kind: "egress"`. The receipt goes to the log like any other.
 
-**It needs lockdown.** A proxy alone is advice: an agent can ignore `HTTPS_PROXY` and connect directly. The witness means something only when the agent's network reaches nothing but the gateway and the witness. The witness runs anywhere Node 22 runs, but the lockdown belongs to the platform the agent runs on. `deploy/gateway/lockdown` ships it for Kubernetes (a NetworkPolicy) and docker compose (an internal network). On a VM, bare metal, a cloud task, or a laptop, you build the default-deny egress with that platform's own firewall. [Credential custody and lockdown](../../../site/guide/credential-custody.md) explains each.
+**It needs lockdown.** A proxy alone is advice: an agent can ignore `HTTPS_PROXY` and connect directly. The witness means something only when the agent's network reaches nothing but the gateway and the witness. The witness runs anywhere Node 22 runs, but the lockdown belongs to the platform the agent runs on. `deploy/gateway/lockdown` ships it for Kubernetes (a NetworkPolicy), docker compose (an internal network), and a Linux VM or bare metal (`lockdown/vm`: an nftables rule on the agent's Unix user, a systemd drop-in for the agent's unit, a unit for the witness, and a script that runs the lockdown checks). On a cloud task or a laptop, you build the default-deny egress with that platform's own firewall. [Credential custody and lockdown](../../../site/guide/credential-custody.md) explains each.
 
 **What it cannot see.** Every page about the witness repeats this list:
 
 - **Payloads.** CONNECT is relayed as an opaque tunnel, with no TLS interception. The witness records where traffic went, when, and how many bytes went each way. It never records what was sent or received. For plain HTTP it records the method, host, and port, not the path, the headers, or the body.
-- **Traffic that skips it.** With lockdown off, an agent that ignores `HTTPS_PROXY` leaves no receipt at all. With lockdown on, DNS to the cluster resolver stays open, and a resolver that forwards to the internet can still carry data in its queries.
+- **Traffic that skips it.** With lockdown off, an agent that ignores `HTTPS_PROXY` leaves no receipt at all. With lockdown on Kubernetes, DNS to the cluster resolver stays open, and a resolver that forwards to the internet can still carry data in its queries. The VM recipe closes DNS to the agent.
 - **Protocols other than HTTP.** The witness relays HTTP requests and CONNECT tunnels. Under lockdown, other protocols cannot leave. Without lockdown they are invisible to it.
 
 Each receipt is an **observed bypass**: evidence that the agent connected to a destination around the gateway. It is not a record of what the agent did there.
