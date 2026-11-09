@@ -57,7 +57,24 @@ jobs:
         run: |
           echo ci > "$RUNNER_TEMP/console-token"
           CONSOLE_TOKEN_FILE="$RUNNER_TEMP/console-token" docker compose -f deploy/gateway/docker-compose.yaml --profile init --profile tls --profile console config -q
-          CONSOLE_TOKEN_FILE="$RUNNER_TEMP/console-token" docker compose -f deploy/gateway/docker-compose.yaml -f deploy/gateway/lockdown/docker-compose.yaml --profile demo-agent config -q
+          sed 's/^EGRESS_SECRET_RESEARCH_AGENT=$/EGRESS_SECRET_RESEARCH_AGENT=ci-secret/' deploy/gateway/lockdown/agents/research-agent.env.example > deploy/gateway/lockdown/agents/research-agent.env
+          lockdown() { CONSOLE_TOKEN_FILE="$RUNNER_TEMP/console-token" docker compose -f deploy/gateway/docker-compose.yaml -f deploy/gateway/lockdown/docker-compose.yaml --profile demo-agent config --format json; }
+          # The agent's secret reaches the witness and that agent from the agent's own file, and never the gateway. The
+          # agent's proxy URL is not interpolated by compose: it is built in the container from the agent's own value.
+          clean=$(lockdown)
+          echo "$clean" | jq -e '.services.egress.environment.EGRESS_SECRET_RESEARCH_AGENT == "ci-secret"'
+          echo "$clean" | jq -e '.services.agent.environment.EGRESS_SECRET_RESEARCH_AGENT == "ci-secret"'
+          echo "$clean" | jq -e '.services.agent.environment | has("HTTPS_PROXY") | not'
+          echo "$clean" | jq -e '.services.agent.entrypoint | tostring | contains("${EGRESS_SECRET_RESEARCH_AGENT:?")'
+          echo "$clean" | jq -e '[.services.gateway.environment | keys[] | select(startswith("EGRESS_SECRET_"))] == []'
+          # A value left in .env or the shell no longer stands in for the agent's own file: the agent and the witness still
+          # get the file's value. The gateway gets the leftover from .env, and its entrypoint refuses to start (smoke.sh).
+          echo "EGRESS_SECRET_RESEARCH_AGENT=leftover" > deploy/gateway/.env
+          leftover=$(EGRESS_SECRET_RESEARCH_AGENT=shell-leftover lockdown)
+          echo "$leftover" | jq -e '.services.egress.environment.EGRESS_SECRET_RESEARCH_AGENT == "ci-secret"'
+          echo "$leftover" | jq -e '.services.agent.environment.EGRESS_SECRET_RESEARCH_AGENT == "ci-secret"'
+          echo "$leftover" | jq -e '.services.gateway.environment.EGRESS_SECRET_RESEARCH_AGENT == "leftover"'
+          rm deploy/gateway/.env
       - run: kubectl kustomize deploy/gateway/k8s > /dev/null
       - run: kubectl kustomize deploy/gateway/lockdown/k8s > /dev/null
       - run: shellcheck deploy/gateway/gateway-entrypoint.sh deploy/gateway/smoke.sh deploy/gateway/lockdown/vm/check-lockdown.sh .github/scripts/*.sh

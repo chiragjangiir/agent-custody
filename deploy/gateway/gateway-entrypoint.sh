@@ -4,6 +4,7 @@
 # egress: starts the egress witness on 0.0.0.0, creating its key on first start; extra arguments replace the defaults.
 # init: writes a starter config, an example policy, and a demo principal key and grant into /config.
 # Anything else is passed to the agent-custody CLI, so `docker exec <container> revoke --config ... --grant ...` works.
+# Every command but egress refuses to run with an EGRESS_SECRET_* variable in its environment (below).
 set -eu
 
 : "${DATA_DIR:=/data}"
@@ -15,6 +16,18 @@ set -eu
 : "${EGRESS_KEY:=$DATA_DIR/keys/egress.key}"
 : "${EGRESS_PORT:=8791}"
 config_dir=$(dirname "$GATEWAY_CONFIG")
+
+# An agent's proxy secret for the egress witness (left in .env, which the gateway, the console and init load) would let
+# that process connect through the witness as the agent. Every command but egress, the one that must hold the secrets,
+# refuses to run with one. Names only: the value never goes to the log. `docker exec` does not pass through here; in a
+# running gateway container, serve has already refused.
+if [ "${1:-serve}" != egress ]; then
+  leftover=$(env | sed -n 's/^\(EGRESS_SECRET_[A-Za-z0-9_]*\)=.*/\1/p' | tr '\n' ' ')
+  if [ -n "$leftover" ]; then
+    echo "gateway: ${leftover}is in this container's environment, so '${1:-serve}' is not running. A proxy secret belongs only to the egress witness and its agent: move it from .env to lockdown/agents/<agent>.env" >&2
+    exit 1
+  fi
+fi
 
 case "${1:-serve}" in
   serve)

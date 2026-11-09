@@ -7,9 +7,18 @@
 #
 # The witness creates its key on first start and prints the public half in its log; verifiers check its receipts with it.
 #
-# Set EGRESS_SECRET_RESEARCH_AGENT in .env (openssl rand -hex 32), and the same value in the agent's HTTPS_PROXY. The
-# `agent` service is a stand-in: replace its image and entrypoint with your agent's, keep its network, proxy, and
-# NO_PROXY settings. The witness needs a release that has `agent-custody egress`.
+# Each agent's proxy secret goes in a file of its own, lockdown/agents/<agent>.env, never in .env: the gateway loads
+# .env, and a gateway that held a witness password could connect through the witness as that agent (the gateway image
+# runs no command but egress with an EGRESS_SECRET_* variable). The witness loads every agent's file; each agent loads only its own.
+#
+#   cp lockdown/agents/research-agent.env.example lockdown/agents/research-agent.env   # then set the secret in it
+#   chmod 600 lockdown/agents/research-agent.env
+#
+# The agent builds its HTTPS_PROXY from that secret when it starts, so the secret never passes through compose's
+# interpolation, which reads the shell and .env first. The `agent` service is a stand-in: replace its image and command
+# with your agent's, and keep its network, env file, entrypoint (or build the proxy URL the same way in your own), and
+# NO_PROXY. The long form of env_file (path, required) needs Docker Compose 2.24 or later. The witness needs a release
+# that has `agent-custody egress`.
 #
 # What this does not cover: a connection the witness relays is opaque to it (no TLS interception), so it records where
 # traffic went and how much, never what was sent. Docker's embedded DNS still answers on the internal network.
@@ -29,10 +38,12 @@ services:
     command: ["egress"]
     restart: unless-stopped
     user: "${GATEWAY_UID:-10001}:${GATEWAY_GID:-10001}"
-    # only the agents' proxy secrets: the witness holds no tool credential
+    # every agent's proxy secret, one file per agent: the witness holds no tool credential
+    env_file:
+      - path: ./lockdown/agents/research-agent.env
+        required: true
     environment:
       EGRESS_CONFIG: /egress/egress.json
-      EGRESS_SECRET_RESEARCH_AGENT: ${EGRESS_SECRET_RESEARCH_AGENT:-}
     volumes:
       - ./lockdown/config:/egress:ro
       - egress-data:/data
@@ -45,17 +56,26 @@ services:
       - no-new-privileges:true
 
   agent:
-    # a stand-in agent: `docker compose ... exec agent node -e "fetch('https://api.stripe.com').catch(e => console.log(e.cause))"`
-    # is refused by the witness, and a fetch that ignores the proxy has no route at all
+    # a stand-in agent: `docker compose ... run --rm agent node -e "fetch('https://api.stripe.com').catch(e => console.log(e.cause))"`
+    # is refused by the witness, and a fetch that ignores the proxy has no route at all (`run`, not `exec`: the
+    # entrypoint is what sets the proxy)
     profiles: [demo-agent]
     image: ghcr.io/svayatta/agent-custody-gateway:${AGENT_CUSTODY_GATEWAY_VERSION:?set AGENT_CUSTODY_GATEWAY_VERSION in .env to a release version}
-    entrypoint: ["node", "-e", "setInterval(() => {}, 1 << 30)"]
+    # the proxy URL is built here, inside the container, from this agent's own secret; a blank secret stops the agent
+    entrypoint:
+      - sh
+      - -c
+      - 'p="http://research-agent:$${EGRESS_SECRET_RESEARCH_AGENT:?not set: put it in lockdown/agents/research-agent.env}@egress:8791"; export HTTPS_PROXY="$$p" HTTP_PROXY="$$p"; exec "$$@"'
+      - agent
+    command: ["node", "-e", "setInterval(() => {}, 1 << 30)"]
     # the image's healthcheck is for a gateway or a witness; this stand-in is neither
     healthcheck:
       disable: true
+    # its own proxy secret and no other agent's
+    env_file:
+      - path: ./lockdown/agents/research-agent.env
+        required: true
     environment:
-      HTTPS_PROXY: http://research-agent:${EGRESS_SECRET_RESEARCH_AGENT:-}@egress:8791
-      HTTP_PROXY: http://research-agent:${EGRESS_SECRET_RESEARCH_AGENT:-}@egress:8791
       # the gateway is reached directly; its calls are receipted by the gateway itself
       NO_PROXY: gateway
       NODE_USE_ENV_PROXY: "1"
