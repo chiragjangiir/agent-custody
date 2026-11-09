@@ -1,6 +1,6 @@
 {
   "name": "@agent-custody/state",
-  "version": "0.16.0",
+  "version": "0.16.1",
   "description": "Governed memory for AI agents: a fact ledger with provenance, valid time, rollback, lineage, certified forget, and a store that is a JSONL file, SQLite, or Postgres, built on @agent-custody/receipts",
   "license": "Apache-2.0",
   "repository": {

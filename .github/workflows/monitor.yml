@@ -21,4 +21,4 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: 22
-      - run: npx -y @agent-custody/receipts@0.16.0 log-check --log-url https://log.agent-custody.dev/ --checkpoints-url https://checkpoints.agent-custody.dev/ --tenant default --tenant agent-custody --max-lag 900
+      - run: npx -y @agent-custody/receipts@0.16.1 log-check --log-url https://log.agent-custody.dev/ --checkpoints-url https://checkpoints.agent-custody.dev/ --tenant default --tenant agent-custody --max-lag 900

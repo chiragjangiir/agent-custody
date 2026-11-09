@@ -3,7 +3,7 @@
 # docker compose, a single VM, and Kubernetes; only the environment differs.
 FROM node:24-alpine@sha256:44fce696f38ba8c987c4db89954051000bbd05ffd8d8659ba15ed4a8602e937f
 
-ARG AGENT_CUSTODY_VERSION=0.16.0
+ARG AGENT_CUSTODY_VERSION=0.16.1
 # A release installs the published package; a pull request check puts a tarball of the workspace package in pkg/.
 COPY pkg/ /tmp/pkg/
 RUN if ls /tmp/pkg/*.tgz > /dev/null 2>&1; then npm install -g /tmp/pkg/*.tgz pg@8 @node-saml/node-saml@5; else npm install -g "@agent-custody/receipts@${AGENT_CUSTODY_VERSION}" pg@8 @node-saml/node-saml@5; fi \
