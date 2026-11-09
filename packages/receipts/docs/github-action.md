@@ -1,6 +1,6 @@
 # Verifying receipts on a pull request
 
-A pull request is where a team reviews the work of an agent. The GitHub Action in this repository verifies the receipts of that work and puts the result on the pull request. A reviewer sees the result and installs nothing.
+A pull request is where a team reviews the work of an agent. The GitHub Action in this repository verifies the receipts of that work and puts the result on the pull request. A reviewer sees the result and installs nothing. The action is listed on the GitHub Marketplace as [agent-custody receipts](https://github.com/marketplace/actions/agent-custody-receipts).
 
 The action runs `agent-custody verify --markdown` on a directory of receipt bundles. It writes one table to the job summary. On a pull request it also posts the same table as one comment, and it edits that comment on each later push. The `agent-custody export` command puts the receipts into the branch, and it refuses a receipt that publishes the call.
 
