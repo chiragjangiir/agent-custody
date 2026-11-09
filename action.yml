@@ -1,5 +1,8 @@
 name: agent-custody receipts
 description: Verify agent-custody receipt bundles and post the result on the pull request.
+branding:
+  icon: file-text
+  color: orange
 
 inputs:
   path:
