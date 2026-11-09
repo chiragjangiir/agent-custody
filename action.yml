@@ -24,7 +24,7 @@ inputs:
     description: The version of @agent-custody/receipts to run. The action runs it with npx.
     default: 0.16.0
   github-token:
-    description: A token that can write pull request comments. Without that right, the action writes the job summary only.
+    description: A token that can write pull request comments. Without that right, or with an empty value, the action writes the job summary only.
     default: ${{ github.token }}
   comment-author:
     description: The login of the account that github-token posts as. The action edits only a comment from this account. Change it when you give a token of a user or of an app.
@@ -73,10 +73,12 @@ runs:
 
         cat "$summary" >> "$GITHUB_STEP_SUMMARY"
 
-        if [ -n "$PR_NUMBER" ]; then
+        if [ -n "$PR_NUMBER" ] && [ -z "$GH_TOKEN" ]; then
+          echo "No github-token was given. The result is in the job summary only."
+        elif [ -n "$PR_NUMBER" ]; then
           url="repos/${REPO}/issues/${PR_NUMBER}/comments"
           # any user can post the marker line, so the author must match as well
-          comment_id=$(MARKER="$marker" gh api --paginate "$url" --jq '.[] | select(.user.login == env.COMMENT_AUTHOR and (.body | startswith(env.MARKER))) | .id' 2> /dev/null | tail -n 1)
+          comment_id=$(MARKER="$marker" gh api --paginate "$url" --jq '.[] | select(.user.login == env.COMMENT_AUTHOR and (.body | startswith(env.MARKER))) | .id' 2> /dev/null | tail -n 1) || comment_id=""
           posted=1
           if [ -n "$comment_id" ]; then
             gh api --method PATCH "repos/${REPO}/issues/comments/${comment_id}" -F body=@"$summary" > /dev/null 2>&1 && posted=0

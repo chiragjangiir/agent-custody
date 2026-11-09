@@ -1,6 +1,7 @@
 # Runs the GitHub Action in action.yml on each pull request that can change it. The CLI comes from a tarball of this
 # commit, not from npm, so the action is tested with the code it will ship. Two runs: signed receipts that must
-# verify, and the same receipts with one changed byte, which must fail.
+# verify, and the same receipts with one changed byte, which must fail. The receipts are fixed test vectors, not
+# anything the pull request produced, so neither run comments on the pull request; the results are in the job summary.
 name: action
 
 on:
@@ -12,7 +13,6 @@ on:
 
 permissions:
   contents: read
-  pull-requests: write
 
 jobs:
   action:
@@ -49,13 +49,14 @@ jobs:
           writeFileSync(join(out, "gateway.pub"), v.keys.gateway.publicKeyPem);
           writeFileSync(join(out, "principal.pub"), v.keys.principal.publicKeyPem);
           EOF
-      - name: Signed receipts verify, and the result goes on the pull request
+      - name: Signed receipts verify
         uses: ./
         with:
           path: ${{ runner.temp }}/fx/good
           issuer-key: ${{ runner.temp }}/fx/gateway.pub
           principal-key: ${{ runner.temp }}/fx/principal.pub
           version: ${{ steps.pack.outputs.version }}
+          github-token: ""
       - name: A receipt with one changed byte fails the step
         id: tampered
         continue-on-error: true

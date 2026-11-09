@@ -38,7 +38,7 @@ Pin the action to the commit of a release, as you pin every other action. A movi
 | `log-url` | the URL of the log; the action fetches the log key from it (`verify --log-url`) | |
 | `log-id` | the id that every tree head must name (`verify --log-id`) | |
 | `version` | the `@agent-custody/receipts` version that `npx` runs | `0.16.0` |
-| `github-token` | a token that can write pull request comments | `github.token` |
+| `github-token` | a token that can write pull request comments; an empty value writes the job summary only | `github.token` |
 | `comment-author` | the login of the account that `github-token` posts as; the action edits only a comment from this account | `github-actions[bot]` |
 
 ## What the action does
