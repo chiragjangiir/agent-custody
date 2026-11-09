@@ -1,7 +1,7 @@
 // Append-only Merkle log with RFC 6962 / RFC 9162 hashing and inclusion proofs.
 // Leaves are stored as JSONL so anyone holding the file can recompute the root.
 import { createHash } from "node:crypto";
-import { appendFileSync, closeSync, mkdirSync, openSync, readSync, statSync, truncateSync } from "node:fs";
+import { appendFileSync, closeSync, fstatSync, mkdirSync, openSync, readSync, statSync, truncateSync, writeSync, type Stats } from "node:fs";
 import { dirname } from "node:path";
 import { withLock } from "./lock.ts";
 
@@ -180,17 +180,25 @@ export function logLocked<T>(file: string, fn: () => T): T {
   return withLock(`${file}.lock`, { staleMs: LOCK_STALE_MS, waitMs: LOG_LOCK_WAIT_MS }, fn);
 }
 
+/** The append descriptor of a log that was dropped without being closed is closed when the log is collected. */
+interface Appender { fd: number | null; dev: number; ino: number }
+const appenders = new FinalizationRegistry<Appender>((out) => {
+  if (out.fd !== null) try { closeSync(out.fd); } catch { /* already closed */ }
+});
+
 export class MerkleLog {
   private readonly hashes: Buffer[] = [];
   private tree = new SubtreeCache(this.hashes);
   private readonly file: string;
   private bytes = 0;
   private inode: number | bigint = -1;
+  private readonly out: Appender = { fd: null, dev: 0, ino: 0 };
 
   constructor(file: string) {
     this.file = file;
     mkdirSync(dirname(file), { recursive: true });
     this.catchUp();
+    appenders.register(this, this.out);
   }
 
   /**
@@ -198,17 +206,17 @@ export class MerkleLog {
    * short is read again from the start. Bytes after the last newline are not read: a writer may be in the middle of its
    * write, or may have died in it.
    */
-  private catchUp(): void {
-    let st;
+  private catchUp(): Stats | null {
+    let st: Stats | null;
     try { st = statSync(this.file); } catch { st = null; }
     if (!st || st.ino !== this.inode || st.size < this.bytes) {
       this.hashes.length = 0;
       this.tree = new SubtreeCache(this.hashes);
       this.bytes = 0;
     }
-    if (!st) return;
+    if (!st) return null;
     this.inode = st.ino;
-    if (st.size === this.bytes) return;
+    if (st.size === this.bytes) return st;
     const buf = Buffer.alloc(st.size - this.bytes);
     const fd = openSync(this.file, "r");
     let got = 0;
@@ -230,6 +238,7 @@ export class MerkleLog {
       // roots, and every proof are the same either way.
       this.hashes.push(typeof parsed === "string" ? leafHash(parsed) : Buffer.from((parsed.pruned ?? parsed.hash)!, "hex"));
     }
+    return st;
   }
 
   /**
@@ -254,12 +263,51 @@ export class MerkleLog {
   /** Under the lock: reads what other writers appended, then writes this line, so each leaf gets the next index. */
   private appendLine(line: string, hash: () => Buffer): InclusionProof & { rootHash: string } {
     return logLocked(this.file, () => {
-      this.catchUp();
+      const st = this.catchUp();
       this.cutTornTail();
-      appendFileSync(this.file, line);
+      this.write(line, st);
       this.bytes += Buffer.byteLength(line);
       return this.pushHash(hash());
     });
+  }
+
+  /**
+   * Under the lock: writes the line through one descriptor opened for append, so the file is not opened and closed
+   * for every leaf. O_APPEND puts each write at the end, after a torn tail was cut too. The descriptor is reopened when
+   * the path names another file than the one it holds (a prune renames a new file into place) or no file. Nothing is
+   * fsynced, as before: the line is in the kernel's page cache when the append returns.
+   */
+  private write(line: string, st: Stats | null): void {
+    const out = this.out;
+    if (out.fd === null || !st || st.ino !== out.ino || st.dev !== out.dev) {
+      this.close();
+      const fd = openSync(this.file, "a");
+      const now = fstatSync(fd);
+      if (st && (now.ino !== st.ino || now.dev !== st.dev)) {
+        closeSync(fd);
+        throw new Error(`${this.file} was replaced while its lock was held; the leaf was not appended`);
+      }
+      out.fd = fd;
+      out.dev = now.dev;
+      out.ino = now.ino;
+      this.inode = now.ino;
+    }
+    const buf = Buffer.from(line);
+    try {
+      for (let off = 0; off < buf.length; ) off += writeSync(out.fd, buf, off);
+    } catch (e) {
+      // the bytes written so far are a torn tail, which the next append cuts; that append reopens the file
+      this.close();
+      throw e;
+    }
+  }
+
+  /** Closes the append descriptor. The log stays usable: the next append opens the file again. */
+  close(): void {
+    if (this.out.fd === null) return;
+    const fd = this.out.fd;
+    this.out.fd = null;
+    closeSync(fd);
   }
 
   get size(): number {

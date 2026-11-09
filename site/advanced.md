@@ -149,12 +149,12 @@ Measured on a laptop (lower is better):
 
 | what | median |
 | --- | --- |
-| a policy decision | 0.10 ms |
-| a full gateway call | 0.52 ms |
-| verifying a receipt | 0.14 ms |
+| a policy decision | 0.04 ms |
+| a full gateway call | 2.4 ms |
+| verifying a receipt | 0.15 ms |
 | a receipt (the log gets 32 bytes) | 5.7 KB |
 
-Medians, Apple silicon, Node 22, from [scripts/bench.ts](https://github.com/svayatta/agent-custody/blob/main/packages/receipts/scripts/bench.ts). You can run it.
+Medians, Apple M5, macOS, Node 22, 9 November 2026, from [scripts/bench.ts](https://github.com/svayatta/agent-custody/blob/main/packages/receipts/scripts/bench.ts). You can run it. Most of the gateway call on macOS is the log lock, which runs `ps` for each append; on Linux it reads `/proc`. [What a receipt costs](https://github.com/svayatta/agent-custody/blob/main/packages/receipts/docs/performance.md) times each step.
 
 ## Use cases
 

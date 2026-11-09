@@ -84,16 +84,66 @@ export function reservedCedarForm(value: unknown, path = "args"): string | null 
   return null;
 }
 
-export function evaluate(policyText: string, req: PolicyRequest): PolicyDecision {
+interface ParsedPolicy {
+  /** the id the policy set is preparsed under in cedar-wasm; unused when parseErrors is non-empty */
+  slot: string;
+  digest: string;
+  parseErrors: string[];
+}
+
+/** Policy sets kept parsed, most recently used last. A reload or a second gateway in the process takes another slot. */
+const PARSED_SLOTS = 8;
+const parsed = new Map<string, ParsedPolicy>();
+/** Slot ids that no live entry holds. At most PARSED_SLOTS + 1 ids are ever made. */
+const freeSlots: string[] = [];
+let slotsMade = 0;
+
+/**
+ * The policy set parsed once per text, so a decision no longer parses the whole file. Keyed by the text itself: an
+ * edited file is a new key, a new parse, and a new digest. A new text takes a slot that no live entry holds, and the
+ * least recently used entry is evicted, and its slot freed, only once the new entry is in place: a preparse that throws
+ * or fails never changes the set a live entry decides with. Reusing a freed id replaces the set held in cedar-wasm, so
+ * neither side grows past PARSED_SLOTS + 1. A failed preparse leaves the slot's previous set in place, so an entry with
+ * parse errors must never be evaluated.
+ */
+function parsedPolicy(policyText: string): ParsedPolicy {
+  const hit = parsed.get(policyText);
+  if (hit) {
+    parsed.delete(policyText);
+    parsed.set(policyText, hit);
+    return hit;
+  }
   const digest = policyDigest(policyText);
+  const slot = freeSlots.pop() ?? `agent-custody-policy-${slotsMade++}`;
+  let answer: ReturnType<typeof cedar.preparsePolicySet>;
+  try {
+    answer = cedar.preparsePolicySet(slot, { staticPolicies: policyText });
+  } catch (e) {
+    freeSlots.push(slot);
+    throw e;
+  }
+  const entry = { slot, digest, parseErrors: answer.type === "success" ? [] : answer.errors.map((e) => e.message) };
+  parsed.set(policyText, entry);
+  if (parsed.size > PARSED_SLOTS) {
+    const [oldest, evicted] = parsed.entries().next().value!;
+    parsed.delete(oldest);
+    freeSlots.push(evicted.slot);
+  }
+  return entry;
+}
+
+export function evaluate(policyText: string, req: PolicyRequest): PolicyDecision {
+  const policy = parsedPolicy(policyText);
+  const digest = policy.digest;
   const reserved = reservedCedarForm(req.context.args);
   if (reserved) return { decision: "deny", reasons: [], errors: [`argument ${reserved} uses a reserved Cedar form; arguments are data, never entities or extension values`], policyDigest: digest };
-  const answer = cedar.isAuthorized({
+  if (policy.parseErrors.length > 0) return { decision: "deny", reasons: [], errors: [...policy.parseErrors], policyDigest: digest };
+  const answer = cedar.statefulIsAuthorized({
     principal: { type: "Agent", id: req.agentId },
     action: { type: "Action", id: req.tool },
     resource: { type: "Tool", id: req.tool },
     context: req.context as cedar.Context,
-    policies: { staticPolicies: policyText },
+    preparsedPolicySetId: policy.slot,
     entities: [],
   });
   if (answer.type === "failure") {

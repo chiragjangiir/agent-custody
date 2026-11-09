@@ -1,11 +1,12 @@
 // One lock design for the files that many processes write: the local log, its prune, and the outbox.
 import { spawn, spawnSync } from "node:child_process";
-import { appendFileSync, existsSync, mkdtempSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { takeLock } from "../src/lock.ts";
 import { leafHash, MerkleLog, rootOf } from "../src/log.ts";
+import { pruneLog } from "../src/retention.ts";
 
 const dir = () => mkdtempSync(join(tmpdir(), "mlock-"));
 const cli = join(import.meta.dirname, "..", "src", "cli.ts");
@@ -113,6 +114,60 @@ describe("the local log", () => {
     appendFileSync(file, JSON.stringify("never acknowledged"));
     expect(log.append("two").leafIndex).toBe(1);
     expect(readFileSync(`${file}.torn`, "utf8")).toBe(JSON.stringify("never acknowledged"));
+  });
+});
+
+// A log keeps one descriptor open for its appends. Each test fails if a leaf goes to a file the path no longer names,
+// or lands anywhere but after the last whole line: the leaf would be acknowledged with a proof that no copy of the log backs.
+describe("the descriptor a log keeps open for its appends", () => {
+  const lines = (file: string) => readFileSync(file, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l) as string);
+
+  it("follows a prune, which renames a new file into place: the next leaf goes into the file the path names", () => {
+    const file = join(dir(), "log.jsonl");
+    const log = new MerkleLog(file);
+    log.append("one");
+    log.append("two");
+    const before = statSync(file).ino;
+    pruneLog(file, "2000-01-01T00:00:00Z");
+    expect(statSync(file).ino).not.toBe(before);
+    const proof = log.append("three");
+    expect(lines(file)).toEqual(["one", "two", "three"]);
+    expect([proof.leafIndex, proof.treeSize]).toEqual([2, 3]);
+    expect(proof.rootHash).toBe(MerkleLog.rootFromFile(file, 3));
+  });
+
+  it("creates the file again when it was removed, and starts the tree again from it", () => {
+    const file = join(dir(), "log.jsonl");
+    const log = new MerkleLog(file);
+    log.append("one");
+    rmSync(file);
+    const proof = log.append("two");
+    expect(lines(file)).toEqual(["two"]);
+    expect(proof.rootHash).toBe(rootOf([leafHash("two")]));
+    expect(log.append("three").rootHash).toBe(MerkleLog.rootFromFile(file, 2));
+  });
+
+  it("writes after the last whole line when another handle appended and a writer died mid-line since its own last write", () => {
+    const file = join(dir(), "log.jsonl");
+    const a = new MerkleLog(file);
+    const b = new MerkleLog(file);
+    a.append("one");
+    b.append("two");
+    appendFileSync(file, '"thr');
+    expect(a.append("three").leafIndex).toBe(2);
+    expect(readFileSync(`${file}.torn`, "utf8")).toBe('"thr');
+    expect(lines(file)).toEqual(["one", "two", "three"]);
+    expect(b.append("four").rootHash).toBe(rootOf(["one", "two", "three", "four"].map(leafHash)));
+  });
+
+  it("opens the file again after close, so a closed log is still a log", () => {
+    const file = join(dir(), "log.jsonl");
+    const log = new MerkleLog(file);
+    log.append("one");
+    log.close();
+    log.close();
+    expect(log.append("two").leafIndex).toBe(1);
+    expect(lines(file)).toEqual(["one", "two"]);
   });
 });
 

@@ -36,6 +36,7 @@ Anyone holding the public keys can verify a receipt offline. The agent is not tr
 - [Completeness](docs/completeness.md): an auditor's read-only key lists the provider's objects and matches each to a verified receipt, so an action taken outside the gateway shows up
 - [Payment mandates and agent identity](docs/mandates.md): the design for fitting grants and receipts to Google's AP2 mandates, Visa's Trusted Agent Protocol and Mastercard Agent Pay; not yet built
 - [Threat model](docs/threat-model.md): every party who could make a receipt false, the move, what stops it, and whether that is a property of the evidence or of the deployment; and what is not defended
+- [What a receipt costs](docs/performance.md): each step of the issuer's hot path in microseconds, measured with `bun run bench`, what is and is not fsynced, and where the time goes
 - [Aligning with IETF SCITT](docs/scitt.md): the receipt as a SCITT signed statement, the log as a transparency service, our RFC 9162 proofs as COSE Receipts (RFC 9942), what differs and the options for each, an agent-action profile, and the steps toward the working group
 
 ## Getting started
@@ -307,11 +308,11 @@ src/cli.ts         keygen, grant, gateway, door, egress, egress draft-policy, ac
 src/retention.ts   pruning the log: leaves become their hashes, bundles are removed, proofs survive
 src/index.ts       the package's public surface; adapters are exported on ./sdk/<framework> subpaths
 tsconfig.build.json  emits dist/ (JavaScript plus declarations) for consumers; the repo itself runs the .ts directly
-scripts/           fake Stripe upstream (signs its results with --key), a second fake upstream, fixture builders for gateway, SDK, door (with a stand-in origin), and the egress witness (with a stand-in destination), the replay builder (`replay.ts`: example 27 and state example 07 as a folder of receipts and public keys anyone can verify with the published packages), demo
+scripts/           fake Stripe upstream (signs its results with --key), a second fake upstream, fixture builders for gateway, SDK, door (with a stand-in origin), and the egress witness (with a stand-in destination), the replay builder (`replay.ts`: example 27 and state example 07 as a folder of receipts and public keys anyone can verify with the published packages), demo, the site's numbers (`bench.ts`), and the per-step hot-path benchmark (`hot-path-bench.ts`, `bun run bench`)
 examples/          runnable tutorials, plus examples/languages/: Python, Go, Java, and Rust clients of the sidecar, run by the test suite, one per aspect; each is run by the test suite
 test/              unit tests per module, end-to-end gateway test, SDK and hook tests,
                    adapter tests against the real packages, and tests that run every policy in docs/policies.md and site/guide/egress-policies.md
-docs/              tutorials, usage (gateway), codex-recovery (live demo), approvals, sdk, policies, verification
+docs/              tutorials, usage (gateway), codex-recovery (live demo), approvals, sdk, policies, verification, performance
 ```
 
 ## Plan
@@ -320,6 +321,7 @@ The design is several producers feeding one verifier. The SDK is the top of the 
 
 **Done**
 
+- A cheaper receipt hot path: a Cedar policy is parsed once per text instead of on every decision (a few slots, evicted oldest first), and the local log keeps one descriptor open for its appends, reopened when a prune replaces the file. The receipt format, the decisions, and what is fsynced are unchanged. `bun run bench` times each step, Cedar and Rego both; [docs/performance.md](docs/performance.md) has the numbers.
 - The egress witness decides by Rego as well as Cedar: a `policyFile` ending in `.rego` is compiled with `opa build` as the gateway compiles one, the input is the Cedar request with plain strings, and a file that does not compile is not loaded. An OPA server is not supported for egress yet ([the egress witness](docs/egress.md#the-same-policy-in-rego), tutorial 44).
 - Drafting an egress policy: `agent-custody egress draft-policy --receipts <dir> --issuer-key <witness.pub>` verifies each egress receipt, keeps the connections the witness relayed for a verified agent, and prints one `permit` per agent and scheme over the `host:port` destinations it used, sorted, with a count and the first and last time seen for each. The output starts with a warning that it permits whatever the agents did, bad destinations included. [Writing egress policies](../../site/guide/egress-policies.md) is the guide, and its examples are tested; tutorial [42-egress-draft.ts](examples/42-egress-draft.ts).
 - An OWASP Agent Control Standard Guardian, as a spike: `agent-custody acs` answers `steps/toolCallRequest` and `steps/toolCallResult` with the Cedar policy's allow or deny, and every decision is a receipt with the new issuer kind `guardian`, signed with the Guardian's key and logged, which ACS's HMAC baseline cannot attribute (ACS §8.6). It publishes the ACS chain head, and its receipts in a log someone else runs answer two of the three directions in ACS issue #18 (a signed checkpoint of `chain_hash`, and signed heads in an external append-only log; Guardians exchanging heads is not done). Handshake, ACS signatures, the other hooks, modify/ask/defer, and provenance are not implemented; [the list](docs/acs.md#what-it-does-not-implement). Example 43.

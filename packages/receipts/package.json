@@ -65,7 +65,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "demo": "tsx scripts/demo.ts",
-    "vectors": "tsx scripts/vectors.ts"
+    "vectors": "tsx scripts/vectors.ts",
+    "bench": "node scripts/hot-path-bench.ts"
   },
   "engines": {
     "node": ">=22"
