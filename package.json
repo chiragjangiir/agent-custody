@@ -1,7 +1,7 @@
 {
   "name": "agent-custody",
   "version": "0.1.0",
-  "description": "Chain of custody for AI agents: what an agent did and what it believes, signed, verifiable, and revertible",
+  "description": "Proof of what your AI agents did. Give your agents real power, without losing control of them.",
   "license": "Apache-2.0",
   "private": true,
   "workspaces": [

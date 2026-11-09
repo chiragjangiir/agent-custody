@@ -2,7 +2,37 @@
 
 [![test](https://github.com/svayatta/agent-custody/actions/workflows/test.yml/badge.svg)](https://github.com/svayatta/agent-custody/actions/workflows/test.yml) [![site](https://github.com/svayatta/agent-custody/actions/workflows/site.yml/badge.svg)](https://github.com/svayatta/agent-custody/actions/workflows/site.yml) [![hosted log](https://github.com/svayatta/agent-custody/actions/workflows/monitor.yml/badge.svg)](https://github.com/svayatta/agent-custody/actions/workflows/monitor.yml) [![npm](https://img.shields.io/npm/v/%40agent-custody%2Freceipts?label=%40agent-custody%2Freceipts)](https://www.npmjs.com/package/@agent-custody/receipts) [![PyPI](https://img.shields.io/pypi/v/agent-custody?label=agent-custody)](https://pypi.org/project/agent-custody/)
 
-**Stop your coding agent from running destructive commands, and keep a signed record that a reviewer can check.**
+**Proof of what your AI agents did.**
+
+Give your agents real power, without losing control of them. Your policy checks your agent's actions before they run. What it forbids does not run. Each action that it checks leaves a signed receipt that anyone can verify.
+
+[![The product overview film, 93 seconds: the problem, the gateway, and a refund agent caught by a prompt injection, then the audit](site/public/promo-poster.jpg)](https://agent-custody.dev/advanced#product-overview-film)
+
+## How it works
+
+```text
+                     your policy  (+ a grant that a person signs, at the gateway)
+                          │
+agent ── action ──► hook or gateway ── allowed ──► tool: shell, database, payments API, MCP server
+                          │
+                          └── allowed or refused ──► signed receipt ──► log ──► verifier (public keys only)
+```
+
+1. You write the policy: what the agent may do. At the gateway, a person also signs a grant. The grant names the agent, its tools, and how long it may act.
+2. Before an action runs, the hook or the gateway checks it against the policy. An action that the policy forbids does not run.
+3. Each action that it checks gets a signed receipt, allowed or refused. The receipt goes into an append-only log.
+4. A reviewer, an auditor, or a counterparty verifies the receipt offline, with public keys only. They need no access to your systems.
+
+There are two ways to start:
+
+| | Coding agents | Agents that move money |
+| --- | --- | --- |
+| What runs | a hook inside Claude Code | a gateway between the agent and its tools |
+| Try it | `agent-custody init claude-code` | `bun run demo` |
+| What it stops in the example | force push, `rm -rf` on `/` and `~`, `terraform destroy`, `drop database` | a refund over the limit, a refund to an unverified customer, a payout outside the grant |
+| Read on | [Start with a coding agent](#start-with-a-coding-agent) | [Agents that move money](#agents-that-move-money) |
+
+## Start with a coding agent
 
 This is for engineers who run Claude Code against repositories and systems that touch production. One command adds a hook to Claude Code. The hook checks each shell command, file edit, and MCP tool call against a deny list before the call runs. The starter list covers force push, `rm -rf` on `/` and `~`, `terraform destroy`, and `drop database`.
 
@@ -13,7 +43,7 @@ agent-custody init claude-code
 
 The command needs Node 22. To try it once, run `npx @agent-custody/receipts init claude-code`. Do not keep the npx form: npm can clear its cache, and the hooks then stop working. The command makes an agent key, writes a starter deny list, and registers the hooks in `.claude/settings.local.json` of the current directory. It starts in observe mode: it blocks nothing until you say so. Details and options: [Setup for Claude Code](site/guide/getting-started.md#claude-code-in-one-command).
 
-## What you see
+### What you see
 
 Work in Claude Code as usual. The hook signs a record of each shell command, file edit, and MCP tool call. The record is called a receipt. Then run the report. It checks the signature of every receipt, and it lists the calls that the deny list would have stopped.
 
@@ -41,7 +71,7 @@ To enforce this policy, remove the "mode": "observe" line from ~/.config/agent-c
 
 That output comes from [tutorial 36](packages/receipts/examples/36-claude-code-init.ts), with the path of `sdk.json` shortened. To enforce the list, remove the `"mode": "observe"` line. A denied call then stops before it runs.
 
-## An incident replay
+### An incident replay
 
 A coding agent runs `terraform destroy`. A script plays the session in enforce mode. It needs no model and no network, and it runs no destructive command.
 
@@ -58,7 +88,7 @@ cd packages/receipts && node examples/38-incident-replay.ts
 
 The full output is on the page [An incident replay](site/guide/incident-replay.md).
 
-## What the hook does not stop
+### What the hook does not stop
 
 The hook stops a shell command, a file edit, or an MCP tool call that the agent makes. Read these limits before you rely on it.
 
@@ -69,9 +99,26 @@ The hook stops a shell command, a file edit, or an MCP tool call that the agent 
 
 To cover more, keep production credentials out of the agent's environment, and put a gateway between the agent and the tools that touch production. The [threat model](packages/receipts/docs/threat-model.md) lists what each part defends, and what it does not. No independent witness runs yet, and the hosted log is not anchored on mainnet yet.
 
+## Agents that move money
+
+A support agent issues refunds through the gateway, against a test Stripe server. A person signed the agent's grant. The policy reads facts that the gateway looks up itself, not what the agent claims.
+
+```bash
+git clone https://github.com/svayatta/agent-custody
+cd agent-custody && bun install && bun run demo
+```
+
+- A £500 refund to a verified customer runs.
+- A £5,000 refund is refused: it is over the policy limit.
+- A £500 refund to an unverified customer is refused. The gateway looked up the customer itself.
+- A payout is refused: the tool is not in the grant.
+- An auditor verifies all four receipts with public keys and a copy of the log. Then someone edits the first receipt to make the refund look smaller, and the verification fails.
+
+The demo needs Node 22 and Bun. The [refund demo](site/advanced.md#the-refund-demo) shows the output step by step. For production payments, read [safe financial operations](packages/receipts/docs/financial-operations.md) (budgets, idempotency, and reconciliation with the provider), [human approvals](packages/receipts/docs/approvals.md) (one or two people approve the exact payment), and [completeness](packages/receipts/docs/completeness.md) (the provider's records matched against the receipts, so an action that went around the gateway shows up).
+
 ## Advanced
 
-Everything above is the Claude Code hook. The rest of the product is below and on the [advanced page](site/advanced.md): the gateway with grants and Cedar policy, the transparency log, the state package for agent memory, the hosted log, and the other frameworks and languages.
+The sections above are the two ways to start. The rest of the product is below and on the [advanced page](site/advanced.md): the gateway with grants and Cedar policy, the transparency log, the state package for agent memory, the hosted log, and the other frameworks and languages.
 
 ### What each piece is for, and when you need it
 
@@ -192,7 +239,7 @@ This whole loop is one runnable file, [packages/state/examples/02-receipt-to-bel
 | --- | --- | --- |
 | [`@agent-custody/receipts`](packages/receipts/README.md) | Signed receipts for tool calls: an MCP gateway with Cedar or Rego policy (a file, or your OPA server) and a Merkle transparency log, an in-process SDK with framework adapters, and an offline verifier | working, with runnable tutorials |
 | [`agent-custody` on PyPI](packages/python/README.md) | The Python client of the sidecar: `decide`, `record`, `wrap`, and adapters for LangChain, the OpenAI Agents SDK, the Claude Agent SDK, CrewAI, Google ADK, and a Hermes Agent plugin, tested against the real packages | working; Go, Java, and Rust clients live in [examples/languages](packages/receipts/examples/languages) |
-| [`@agent-custody/state`](packages/state/README.md) | Governed memory: a fact ledger where every write cites the receipt that caused it, carries valid time and transaction time, and can be superseded or rolled back | ledger on JSONL or SQLite, memory server behind the gateway or shared over HTTP, quarantine and verified provenance, blast radius, certified forget, retention and legal holds, write-through to Mem0 and Zep, eval CLI with signed reports |
+| [`@agent-custody/state`](packages/state/README.md) | Governed memory: a fact ledger where every write cites the receipt that caused it, carries valid time and transaction time, and can be superseded or rolled back | ledger on JSONL, SQLite, or Postgres, memory server behind the gateway or shared over HTTP, quarantine and verified provenance, blast radius, certified forget, retention and legal holds, write-through to Mem0 and Zep, eval CLI with signed reports |
 
 Receipts are the unit. State is the ledger of what the agent came to believe from them. Both append to the same kind of signed log and are checked by the same kind of verifier.
 
@@ -217,7 +264,7 @@ bun run ci                          # everything the GitHub workflow runs; the p
 bun run demo                        # the receipts demo: keys, grant, policy, tool calls, verification, a tampering attempt
 ```
 
-Everything runs on plain Node 22 or later. No build step. Package-level commands, such as the CLI and the tutorials, run from inside that package's directory; each package README says how. [CONTRIBUTING.md](CONTRIBUTING.md) has the rules for a change, a release, and a publish.
+The source runs on plain Node 22 or later with no build step. `bun run build` makes the `dist/` that consumers install. Package-level commands, such as the CLI and the tutorials, run from inside that package's directory; each package README says how. [CONTRIBUTING.md](CONTRIBUTING.md) has the rules for a change, a release, and a publish.
 
 ## Layout
 
@@ -234,4 +281,4 @@ spec/lean/            a Lean 4 model of the verifier's core with machine-checked
 
 ## Plan
 
-The receipts package's roadmap is in [its README](packages/receipts/README.md#plan). The state package has the ledger on JSONL, SQLite, or Postgres with every query answered from an index, the memory server behind the gateway and shared over HTTP, quarantine with three provenance levels and value-level evidence, policy over the fact being changed, consumed facts and blast radius, certified forget with keyed digests and verified removal from stores, retention sweeps and legal holds, the custody pack for counsel, a ledger that lives in a JSONL file, SQLite, or your Postgres, write-through to Mem0 and Zep, and the eval CLI with signed reports; its remaining item is the hosted plane, tracked as an issue in [its README](packages/state/README.md#plan).
+The receipts package's roadmap is in [its README](packages/receipts/README.md#plan). The state package has the ledger on JSONL, SQLite, or Postgres with every query answered from an index, the memory server behind the gateway and shared over HTTP, quarantine with three provenance levels and value-level evidence, policy over the fact being changed, consumed facts and blast radius, certified forget with keyed digests and verified removal from stores, retention sweeps and legal holds, the custody pack for counsel, write-through to Mem0 and Zep, and the eval CLI with signed reports; its remaining item is the hosted plane, tracked as an issue in [its README](packages/state/README.md#plan).

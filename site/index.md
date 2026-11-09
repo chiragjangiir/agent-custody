@@ -1,5 +1,5 @@
 ---
 title: agent-custody
 layout: landing
-description: Stop your coding agent from running destructive commands, and keep a signed record that a reviewer can check.
+description: Proof of what your AI agents did. Give your agents real power, without losing control of them.
 ---

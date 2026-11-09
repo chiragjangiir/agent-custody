@@ -23,7 +23,7 @@ function sitePath(repoPath: string): string | null {
 export default withMermaid(
   defineConfig({
     title: "agent-custody",
-    description: "Stop your coding agent from running destructive commands, and keep a signed record that a reviewer can check.",
+    description: "Proof of what your AI agents did. Give your agents real power, without losing control of them.",
     srcDir: "..",
     srcExclude: ["deploy/**", "site/verifier/**", "**/node_modules/**", "**/dist/**", "**/examples-out/**", "**/demo-out/**", "**/.venv/**", "**/target/**", "CLAUDE.md", "CONTRIBUTING.md", "SECURITY.md", "packages/receipts/examples/**", "packages/state/examples/**", "packages/python/tests/**", "site/README.md"],
     rewrites: {
@@ -58,7 +58,7 @@ export default withMermaid(
       ["link", { rel: "apple-touch-icon", sizes: "180x180", href: "/apple-touch-icon.png?v=2" }],
       ["meta", { name: "theme-color", content: "#b45309" }],
       ["meta", { property: "og:title", content: "agent-custody" }],
-      ["meta", { property: "og:description", content: "Stop your coding agent from running destructive commands, and keep a signed record that a reviewer can check." }],
+      ["meta", { property: "og:description", content: "Proof of what your AI agents did. Give your agents real power, without losing control of them." }],
     ],
     // The conformance vectors are published as files next to the spec, straight from the receipts package.
     buildEnd(siteConfig) {

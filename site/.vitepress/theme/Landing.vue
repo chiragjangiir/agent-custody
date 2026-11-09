@@ -111,8 +111,8 @@ const limits = [
       <section class="hero">
         <div class="wrap">
           <div>
-            <h1>Stop your coding agent from running destructive commands, and keep a signed record that a reviewer can check.</h1>
-            <p class="lede">For engineers who run Claude Code against repositories and systems that touch production. One command adds a hook to Claude Code. The hook checks each shell command, file edit, and MCP tool call against a deny list before the call runs. The starter list covers force push, <code>rm -rf</code> on <code>/</code> and <code>~</code>, <code>terraform destroy</code>, and <code>drop database</code>.</p>
+            <h1>Proof of what your AI agents did.</h1>
+            <p class="lede">Give your agents real power, without losing control of them. Start with your coding agent: one command adds a hook to Claude Code. The hook checks each shell command, file edit, and MCP tool call against a deny list before the call runs. The starter list covers force push, <code>rm -rf</code> on <code>/</code> and <code>~</code>, <code>terraform destroy</code>, and <code>drop database</code>.</p>
             <div class="cmd"><div class="lines"><div v-for="c in commands" :key="c"><span class="prompt" aria-hidden="true">$</span><code>{{ c }}</code></div></div><button type="button" aria-live="polite" @click="copy('hero')">{{ label("hero") }}</button></div>
             <p v-if="failed === 'hero'" class="note" role="status">Copy failed. Select the command and copy it by hand.</p>
             <p class="note">Needs Node 22. It starts in observe mode: nothing is blocked until you say so.</p>

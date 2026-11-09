@@ -1,5 +1,7 @@
 # agent-custody
 
+**Proof of what your AI agents did.** Give your agents real power, without losing control of them.
+
 Chain of custody for AI agents: a signed receipt for every tool call, checkable with public keys alone. What each check proves, and against whom, is [a table below](#what-a-receipt-proves-and-what-it-does-not).
 
 Three producers, one receipt format, one verifier.
