@@ -97,7 +97,7 @@ export default withMermaid(
             { text: "Explain, review, packs", link: "/reference/state-tools" },
             { text: "Command line", link: "/reference/cli" },
           ] },
-          { text: "Guides", items: [{ text: "Getting started", link: "/guide/getting-started" }, { text: "Architecture", link: "/guide/architecture" }, { text: "Deployment", link: "/guide/deployment" }, { text: "Credential custody and lockdown", link: "/guide/credential-custody" }, { text: "Writing policies", link: "/receipts/policies" }, { text: "Verifying a receipt", link: "/receipts/verification" }] },
+          { text: "Guides", items: [{ text: "Getting started", link: "/guide/getting-started" }, { text: "Architecture", link: "/guide/architecture" }, { text: "Deployment", link: "/guide/deployment" }, { text: "Credential custody and lockdown", link: "/guide/credential-custody" }, { text: "Writing policies", link: "/receipts/policies" }, { text: "Writing egress policies", link: "/guide/egress-policies" }, { text: "Verifying a receipt", link: "/receipts/verification" }] },
         ],
         "/": [
         { text: "Start here", items: [
@@ -122,6 +122,7 @@ export default withMermaid(
           { text: "The door", link: "/receipts/door" },
           { text: "Door signals", link: "/receipts/door-signals" },
           { text: "The egress witness", link: "/receipts/egress" },
+          { text: "Writing egress policies", link: "/guide/egress-policies" },
           { text: "Live Codex recovery demo", link: "/receipts/codex-recovery" },
           { text: "Payload-bound approvals", link: "/receipts/approvals" },
           { text: "The interceptor SDK and other languages", link: "/receipts/sdk" },

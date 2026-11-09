@@ -5,6 +5,7 @@ This file holds the rules for one area of the code at a time. The rules for ever
 ## Files that change together
 
 - `packages/receipts/docs/policies.md` and `packages/receipts/test/docs-policies.test.ts`: the test executes every Cedar example in the guide.
+- `site/guide/egress-policies.md` and `packages/receipts/test/docs-egress-policies.test.ts`: the same, for the egress witness's policies, with each request built as the witness builds it.
 - The `_meta` keys `agent-custody/receipt`, `agent-custody/agent`, and `agent-custody/observed` are in both packages. The state package duplicates them on purpose, to avoid a runtime import. Keep the strings identical.
 - The console's routes in `packages/receipts/src/console.ts` and its page in `console-page.ts`: every `/api/` route is behind the token, the page writes data with `textContent` only, and `test/console.test.ts` checks both and compiles the page's script. A new route is added to `docs/console.md`.
 - The tenant path regex in `packages/receipts/src/log-sink.ts` lists the permitted tenant operations. Add each new tenant route there.

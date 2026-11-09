@@ -17,6 +17,7 @@ Anyone holding the public keys can verify a receipt offline. The agent is not tr
 - [Tutorials](docs/tutorials.md): runnable examples, one per aspect of the code, all executed by the test suite
 - [The door](docs/door.md): a receipted reverse proxy in front of your own site or API; what it knows about an arrival, how an arrival becomes a Cedar request, what the arrival gets back, and what it does not do yet
 - [The egress witness](docs/egress.md): a receipted forward proxy for calls that go around the gateway; lockdown, how the witness knows the agent, the Cedar request per destination, the receipt, and what it cannot see: payloads, traffic when lockdown is off, and non-HTTP protocols
+- [Writing egress policies](../../site/guide/egress-policies.md): per-agent allow lists, wildcard hosts and the `*.example.com` trap, ports, IP literals, why a provider that needs a credential stays in the gateway, `forbid`, and rolling out from observe mode with `egress draft-policy`; every example is tested
 - [Door signals](docs/door-signals.md): every field of the arrival fact, labelled checked, observed, or a claim, with what it does and does not mean and how a policy should read it
 - [Financial operations](docs/financial-operations.md): durable operation ids, provider idempotency keys, atomic daily budget reservations, and reconciliation receipts for uncertain outcomes
 - [The gateway console](docs/console.md): an admin service for the person who runs a gateway: config, tools, receipts with a verdict each, a policy editor that replays recorded calls before it saves, grant revocation, and an audit trail
@@ -283,6 +284,7 @@ src/operations.ts  SQLite operation claims and daily budget reservations, retain
 src/gateway-http.ts the gateway over Streamable HTTP: one process, a session per connection, each under the grant it presents
 src/door.ts        the door: a reverse proxy in front of your own HTTP surface; every arrival classified, decided per route, relayed or refused, receipted as issuer kind door
 src/egress.ts      the egress witness: a forward proxy (CONNECT and plain HTTP, no TLS interception) for calls around the gateway; agent by proxy credential, decided per destination, receipted as issuer kind egress
+src/egress-draft.ts `egress draft-policy`: a first egress policy from verified observe-mode receipts, one permit per agent and scheme over the destinations it used, for review
 src/sdk/index.ts   the interceptor: policy decision, record, wrap(tool fn)
 src/sdk/claude.ts  Claude Code command hook and Claude Agent SDK in-process hooks
 src/sdk/openai-agents.ts, vercel-ai.ts, langchain.ts   framework adapters, tested against the real packages
@@ -298,14 +300,14 @@ src/verify.ts      offline verification, the human-readable report, and the audi
 src/claude-init.ts `init claude-code`: the agent key, the observe-mode config, the starter policy, and the three hooks merged into the settings file with absolute paths
 src/deny-report.ts `report`: verifies the receipts of an SDK config and lists the calls the policy would have denied
 templates/         the starter Cedar policy that `init claude-code` copies (shipped in the package)
-src/cli.ts         keygen, grant, gateway, door, egress, init, report, hook, serve, log, prune, verify, reveal, audit, policy simulate
+src/cli.ts         keygen, grant, gateway, door, egress, egress draft-policy, init, report, hook, serve, log, prune, verify, reveal, audit, policy simulate
 src/retention.ts   pruning the log: leaves become their hashes, bundles are removed, proofs survive
 src/index.ts       the package's public surface; adapters are exported on ./sdk/<framework> subpaths
 tsconfig.build.json  emits dist/ (JavaScript plus declarations) for consumers; the repo itself runs the .ts directly
 scripts/           fake Stripe upstream (signs its results with --key), a second fake upstream, fixture builders for gateway, SDK, door (with a stand-in origin), and the egress witness (with a stand-in destination), the replay builder (`replay.ts`: example 27 and state example 07 as a folder of receipts and public keys anyone can verify with the published packages), demo
 examples/          runnable tutorials, plus examples/languages/: Python, Go, Java, and Rust clients of the sidecar, run by the test suite, one per aspect; each is run by the test suite
 test/              unit tests per module, end-to-end gateway test, SDK and hook tests,
-                   adapter tests against the real packages, and a test that runs every policy in docs/policies.md
+                   adapter tests against the real packages, and tests that run every policy in docs/policies.md and site/guide/egress-policies.md
 docs/              tutorials, usage (gateway), codex-recovery (live demo), approvals, sdk, policies, verification
 ```
 
@@ -315,6 +317,7 @@ The design is three producers feeding one verifier. The SDK is the top of the fu
 
 **Done**
 
+- Drafting an egress policy: `agent-custody egress draft-policy --receipts <dir> --issuer-key <witness.pub>` verifies each egress receipt, keeps the connections the witness relayed for a verified agent, and prints one `permit` per agent and scheme over the `host:port` destinations it used, sorted, with a count and the first and last time seen for each. The output starts with a warning that it permits whatever the agents did, bad destinations included. [Writing egress policies](../../site/guide/egress-policies.md) is the guide, and its examples are tested; tutorial [42-egress-draft.ts](examples/42-egress-draft.ts).
 - The egress witness: `agent-custody egress` is an HTTP forward proxy for a locked-down agent's connections that do not go to the gateway. It relays CONNECT and plain HTTP with no TLS interception. It identifies the agent only by a per-agent proxy credential it checks, lets the Cedar policy decide per `host:port`, commits each connection to the log before any byte moves, never dials an internal address for a host name, and receipts each connection, relayed or refused, as issuer kind `egress`, with the destination observed and the byte counts each way. `deploy/gateway/lockdown` gives the agent default-deny egress (a Kubernetes NetworkPolicy, an internal docker network). All three verifiers know the new kind, and ten conformance vectors pin it. It cannot see payloads, traffic when lockdown is off, or non-HTTP protocols ([the egress witness](docs/egress.md), [credential custody and lockdown](../../site/guide/credential-custody.md), tutorial 41).
 - An incident replay: `node examples/38-incident-replay.ts` plays a Claude Code session against the starter deny set in enforce mode. `terraform destroy` and `rm -rf ~` are denied before they run, and the denial receipts verify offline with the public key only. The site page [An incident replay](../../site/guide/incident-replay.md) shows the output and the limit: a credential in the agent's environment goes around the hook (tutorial 38).
 - One command for Claude Code (issue #204): `agent-custody init claude-code` makes the agent key, writes `sdk.json` in observe mode with no log, writes a starter deny policy, and merges the three hooks into `.claude/settings.local.json` or `~/.claude/settings.json` with absolute paths, safe to run two times. `agent-custody report` verifies the receipts and prints the calls the policy would have denied, with the reason, the rule, and the receipt id; removing the `mode` line enforces. The default local log takes a lock for each append, so hooks that run at the same time keep one log; `--log-url` needs `--log-key`; a second run keeps the pinned log key and warns about log flags it does not apply; `init` warns when git does not ignore the project settings file ([sdk.md](docs/sdk.md#claude-code), tutorial 36).

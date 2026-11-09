@@ -23,6 +23,7 @@ import { evmChain } from "./anchor-evm.ts";
 import { serveHttp } from "./gateway-http.ts";
 import { createDoorHost, serveDoor } from "./door.ts";
 import { createEgressHost, serveEgress } from "./egress.ts";
+import { draftEgressPolicy } from "./egress-draft.ts";
 import { serveA2a } from "./a2a.ts";
 import { PortalStore, sendFollowUps, servePortal, type MailOptions, type OAuthOptions, type Role, type StripeOptions } from "./portal.ts";
 import type { OidcConfig, SamlConfig } from "./sso.ts";
@@ -62,7 +63,7 @@ function untilStopped(): Promise<void> {
 }
 const SERVICES = new Set(["serve", "witness", "signer", "portal", "log", "console", "door", "egress"]);
 /** a command that waits for untilStopped(); a stdio gateway runs until its input closes and keeps the default signal behaviour */
-const runsUntilStopped = (cmd: string | undefined, args: string[]) => !!cmd && (SERVICES.has(cmd) || (cmd === "gateway" && (args.includes("--http") || args.includes("--a2a"))));
+const runsUntilStopped = (cmd: string | undefined, args: string[]) => !!cmd && ((SERVICES.has(cmd) && !(cmd === "egress" && args[0] === "draft-policy")) || (cmd === "gateway" && (args.includes("--http") || args.includes("--a2a"))));
 
 /** A secret kept in a file that only this process can read, such as a container secret mounted at /run/secrets. The file's path is not a secret; its contents are. */
 function tokenFromFile(path: string): string {
@@ -109,6 +110,10 @@ const USAGE = `agent-custody <command>
                                                    the egress witness: a forward proxy (CONNECT and plain HTTP, no TLS interception) for a
                                                    locked-down agent's calls that do not go to the gateway. Each agent proves itself with its own
                                                    Proxy-Authorization; the Cedar policy decides per host:port; every connection is receipted
+  egress draft-policy --receipts <dir> --issuer-key <witness.pub>... [--log-key <pub>]... [--log <log.jsonl>]
+                                                   a first egress policy from observe-mode receipts: one permit per verified agent and scheme over the
+                                                   host:port destinations the witness relayed for it, each with its count and first and last time. It permits
+                                                   whatever the agents did, bad destinations included: review it. Receipts that do not verify are skipped
   init claude-code [--dir <dir>] [--user] [--enforce] [--log-url <url> [--log-id <id>] [--log-token-env NAME] [--log-key <pub>]]
                                                    one command for your own Claude Code sessions: an agent key, sdk.json in observe mode, a starter deny
                                                    policy, and the three hooks in .claude/settings.local.json (--user: ~/.claude/settings.json). Safe to run twice
@@ -359,6 +364,18 @@ async function main(argv: string[]): Promise<number> {
       return 0;
     }
     case "egress": {
+      if (rest[0] === "draft-policy") {
+        const { values } = parseArgs({ args: rest.slice(1), options: { receipts: { type: "string" }, "issuer-key": { type: "string", multiple: true }, "log-key": { type: "string", multiple: true }, log: { type: "string" } } });
+        if (!values.receipts || !values["issuer-key"]?.length) throw new Error("egress draft-policy needs --receipts <dir> --issuer-key <witness.pub>");
+        const draft = draftEgressPolicy(values.receipts, { issuerKeys: values["issuer-key"].map(loadPublicKey), logKeys: (values["log-key"] ?? []).map(loadPublicKey), ...(values.log ? { logFile: values.log } : {}) });
+        for (const s of draft.skipped) if (s.kind === "unverified") console.error(`skipped ${s.file}: does not verify: ${s.reason}`);
+        process.stdout.write(draft.policy);
+        if (!draft.agents.length) {
+          console.error(`egress draft-policy: no relayed connection from a verified agent among ${draft.read} receipt(s) in ${values.receipts}`);
+          return 1;
+        }
+        return 0;
+      }
       const { values } = parseArgs({ args: rest, options: { config: { type: "string" }, port: { type: "string", default: "8791" }, host: { type: "string", default: "127.0.0.1" } } });
       if (!values.config) throw new Error("egress needs --config");
       const cfg = loadEgressConfig(values.config);

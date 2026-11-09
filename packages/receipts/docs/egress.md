@@ -72,11 +72,25 @@ permit(principal, action, resource)
 when { context.facts.destination.credential == "verified" && context.facts.destination.port == 443 && context.facts.destination.host like "*.example.com" };
 ```
 
+[Writing egress policies](../../../site/guide/egress-policies.md) is the guide to these rules: allow lists, wildcard hosts, ports, IP literals, `forbid`, and rolling out from observe mode. Every example in it is tested.
+
 Do not permit a provider whose calls belong in the gateway. The point of the gateway is that it holds the provider's key and decides each call on its arguments. The witness sees only a host name.
 
 **Internal addresses.** The policy decides on a host name, and the witness then resolves it. A name the agent chose, or a DNS answer someone else chose, could point a permit for a public host at the metadata service or the private network. So the witness drops every internal address from the answer before it connects: loopback, private and shared ranges, link-local (the cloud metadata address `169.254.169.254`), `192.0.0.0/24` (Oracle's metadata at `192.0.0.192`), multicast, reserved space, and their IPv6 forms. That includes IPv4-mapped and NAT64 (`64:ff9b::/96`) addresses, which are judged by the IPv4 address they carry, since a DNS64 answer can wrap an internal one. A name with nothing left fails with an `error` receipt, and no connection is made. The check is in the resolver the socket connects with, so there is no second lookup to rebind. An IP literal is not looked up: it is the Cedar action itself, so it is dialled only when a rule names that address. On Kubernetes, `deploy/gateway/lockdown/k8s/egress-networkpolicy.yaml` refuses the same ranges a second time, at the network.
 
 `agent-custody policy simulate` replays egress receipts like any other.
+
+## Drafting a policy from observe mode
+
+```bash
+agent-custody egress draft-policy --receipts receipts --issuer-key keys/egress.pub [--log-key <pub>]... [--log log.jsonl] > egress-policy.draft.cedar
+```
+
+It reads every regular file `*.json` in the directory, never through a symlink, and verifies each one. A symlink, a special file such as a fifo, and a receipt that does not verify are skipped; a receipt that does not verify is named on stderr. It keeps the egress receipts whose agent is `observed` (a verified proxy credential) and whose connection was relayed (`executed`). It prints one `permit` per agent and scheme over the `host:port` destinations that agent used, sorted, with no duplicates. A plain request and a tunnel to the same `host:port` are the same Cedar action, so each permit also names the scheme it saw (`context.facts.destination.scheme`): an observed plain GET never becomes a permitted CONNECT tunnel. Each permit and each destination carries a comment with its count and its first and last time. A destination that is an IP literal in an internal range is marked `INTERNAL ADDRESS`, because the witness dials a literal that a rule names. The output starts with a warning: the draft permits whatever the agents did in the window, bad destinations included, and a person must review it before it is enforced. It exits 1 when there is nothing to permit.
+
+An observe-mode witness writes the receipt of a 407 with the policy's unenforced decision beside a `denied` status, and that receipt does not verify (`policy decision consistent with execution`). `draft-policy` skips it like any receipt that does not verify. `policy simulate` stops on it.
+
+Tutorial: [42-egress-draft.ts](../examples/42-egress-draft.ts).
 
 ## What the agent gets back
 

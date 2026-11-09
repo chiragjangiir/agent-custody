@@ -36,7 +36,9 @@ const running = await serveEgress(host, { port: 8791, host: "0.0.0.0" });
 // on shutdown: host.close() receipts each open connection as witness-stopped, then running.close()
 ```
 
-`createEgressHost(cfg, { log?, exporter?, autoFlush?, lookup? })` returns `{ keyid, policyDigest(), handleRequest(req, res), handleConnect(req, socket, head), flushOutbox(), pendingReceipts(), close() }`. Also exported: `checkProxyCredential(header, agents)`, `parseAuthority(authority)`, `normalizeHost(host)`, `destinationName(host, port)`, `DESTINATION_FACT`, `EGRESS_VERSION`, `PROXY_REALM`.
+`createEgressHost(cfg, { log?, exporter?, autoFlush?, lookup? })` returns `{ keyid, policyDigest(), handleRequest(req, res), handleConnect(req, socket, head), flushOutbox(), pendingReceipts(), close() }`. `draftEgressPolicy(receiptsDir, { issuerKeys, logKeys?, logFile? })` returns `{ policy, agents, read, used, skipped }`: the draft text that `agent-custody egress draft-policy` prints, each agent with its destinations (`name`, `scheme`, `count`, `first`, `last`, `internal`), and each skipped file with its `kind` (`not-a-file`, `unverified`, `not-egress`, `no-agent`, `not-relayed`, `unsafe-name`) and reason. `DRAFT_WARNING` holds the lines the draft starts with. The guide is [writing egress policies](/guide/egress-policies).
+
+Also exported: `checkProxyCredential(header, agents)`, `parseAuthority(authority)`, `normalizeHost(host)`, `destinationName(host, port)`, `DESTINATION_FACT`, `EGRESS_VERSION`, `PROXY_REALM`.
 
 ## Requests
 
