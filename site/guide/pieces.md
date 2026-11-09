@@ -15,4 +15,6 @@
 | the same, with a witness | checkpoints countersigned by a second signer nobody in the chain controls | both operators and the witness, together |
 | the same, anchored on a chain | checkpoints committed to Ethereum, or another EVM chain, from a published address | the log's operator, only for what no anchor covers yet |
 
+The anchor and the witness both ship in the package. Neither runs for our hosted log yet: the anchor needs a funded key on mainnet, and the witness needs an operator who is not us. [Anchoring](/receipts/anchoring) says what an anchor proves, including the window before the next anchor, and [verifying a receipt](/receipts/verification) covers the witness.
+
 The full list of claims, who can check each, and against whom, is the [proof table](/receipts/#what-a-receipt-proves-and-what-it-does-not). What the gateway does not cover is on the [deployment page](/guide/deployment#what-the-gateway-does-not-cover). A hosted log is [running and taking tenants](/early-access).

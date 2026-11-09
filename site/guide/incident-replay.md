@@ -77,7 +77,7 @@ Use a sandbox or a protected branch for these. The rule ids stay the same when t
 
 An in-process receipt is the agent's own report. Every field in it is `claimed`. The signature shows that the receipt did not change after the hook issued it. It does not show that the hook saw every call. It does not show that anyone outside the agent's process checked the call. Step 5 shows that the receipts are intact. It does not show that the agent had no other way to act.
 
-To cover more, keep production credentials out of the agent's environment. Put a gateway between the agent and the tools that touch production. The [threat model](/receipts/threat-model) lists what each part defends and what it does not.
+To cover more, keep production credentials out of the agent's environment. Put a gateway between the agent and the tools that touch production. Lock down the agent's network, so that a connection around the gateway goes through the egress witness and gets a receipt of where it went, never of what it sent: [credential custody and egress lockdown](/guide/credential-custody). The [threat model](/receipts/threat-model) lists what each part defends and what it does not.
 
 ## Next
 

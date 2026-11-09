@@ -32,14 +32,14 @@ The memory server is not for logging. It is the belief ledger's interface, expos
 
 Everything the gateway proves holds for calls that go through it. These do not, and no receipt says otherwise:
 
-- **An API key in the agent's environment.** If the agent process holds a Stripe key, it can call Stripe directly and nothing here sees it. The fix is a deployment decision: the key lives in the gateway's environment (`upstream.env`, or `headerEnv` on a REST upstream) and not in the agent's.
+- **An API key in the agent's environment.** If the agent process holds a Stripe key, it can call Stripe directly and the gateway does not see it. The fix is a deployment decision: the key lives in the gateway's environment (`upstream.env`, or `headerEnv` on a REST upstream) and not in the agent's. Under egress lockdown, such a direct call is refused or relayed by the egress witness, which receipts the connection but not its content (below).
 - **Another MCP server in the host config.** A host that names the gateway and also names the tool server directly gives the agent both routes. Remove the direct one.
 - **SDK-only wraps and the sidecar.** They run inside the agent's process and record what that process tells them. Every such receipt is `claimed`, and the report says so on the `ISSUER` line.
 - **Subprocesses, databases, queues, and other agents** reached without MCP or the REST connector. Same as the first point: if the agent holds the credential, the agent decides.
 
 ## Where interception stops
 
-If agent code calls an HTTP API directly, outside MCP and outside a wrapped function, nothing here sees it. The answer built for that is the REST connector: describe the API's endpoints as tools in the gateway config, with the credential read from the environment, and the agent calls them through the gateway instead of holding the API key itself. Scope, policy on the gateway's own lookups, pre-commit, and receipts then apply to REST calls exactly as to MCP calls, and a REST upstream sits beside MCP upstreams behind one grant. What remains outside is code that keeps its own credentials and calls out on its own. Taking those away from the agent is a deployment decision: [credential custody and egress lockdown](/guide/credential-custody). Under lockdown, the [egress witness](/receipts/egress) receipts each direct connection, and decides it by policy, with the agent, the destination, and the byte counts. It never records the payload: there is no TLS interception. Without lockdown, an agent can ignore the proxy, and the witness sees nothing.
+If agent code calls an HTTP API directly, outside MCP and outside a wrapped function, the gateway does not see it. The answer built for that is the REST connector: describe the API's endpoints as tools in the gateway config, with the credential read from the environment, and the agent calls them through the gateway instead of holding the API key itself. Scope, policy on the gateway's own lookups, pre-commit, and receipts then apply to REST calls exactly as to MCP calls, and a REST upstream sits beside MCP upstreams behind one grant. What remains outside is code that keeps its own credentials and calls out on its own. Taking those away from the agent is a deployment decision: [credential custody and egress lockdown](/guide/credential-custody). Under lockdown, the [egress witness](/receipts/egress) receipts each direct connection, and decides it by policy, with the agent, the destination, and the byte counts. It never records the payload: there is no TLS interception. Without lockdown, an agent can ignore the proxy, and the witness sees nothing. It relays only HTTP; under lockdown, other protocols cannot leave at all.
 
 ## Observability you already have
 
@@ -61,11 +61,7 @@ So a call costs the network round trip plus about five milliseconds, and a pre-c
 
 ## What you are trusting, by setup
 
-- **SDK or sidecar only.** The record is self-reported by the agent's own process; every field is `claimed`. Good for a history, not for a dispute.
-- **Gateway with the default local log.** Decisions and outcomes were observed outside the agent, and the log is tamper-evident to anyone holding a copy. The operator holds the gateway key and the log file, and can rewrite their own history; a copy taken out of their control is what detects it.
-- **Gateway with a log run by someone else.** The tree heads are signed by a key the operator does not hold. This is the setup in which the operator is not trusted, and it is the one to use when a receipt has an audience outside the team. The reference log server ships in the package, and one is [running](/early-access).
-- **The same, anchored on a chain.** The anchor commits each new checkpoint to Ethereum mainnet, or another EVM chain the installation picks, from a published address, and `log-check` fails a log whose head does not extend the anchored checkpoint. A verifier then needs neither the log's operator nor a witness, only a JSON-RPC endpoint; what the chain cannot cover is the window before the next anchor. The anchor ships in the package; running one for our log is the next step ([anchoring](https://github.com/svayatta/agent-custody/blob/main/packages/receipts/docs/anchoring.md)).
-- **The same, with a witness.** A second signer on a machine the log's operator does not control countersigns the log's checkpoints after proving each extends the last. A verifier who requires the witness is protected against the log's operator too. The witness ships in the package; running one for our log is the next step.
+Each setup, from the SDK alone to a log anchored on a chain, rests on different parties. The table is on [what each piece is for](/guide/pieces#what-you-are-trusting), with the status of the anchor and the witness for our hosted log.
 
 ## Sizing
 

@@ -194,7 +194,7 @@ const limits = [
           <div class="cards c2">
             <div v-for="l in limits" :key="l.t" class="card"><h3>{{ l.t }}</h3><p>{{ l.d }}</p></div>
           </div>
-          <p class="after">To cover more, keep production credentials out of the agent's environment, and put a gateway between the agent and the tools that touch production. The gateway is on the <a href="/advanced">advanced page</a>. The <a href="/receipts/threat-model">threat model</a> lists what each part defends, and what it does not. No independent witness runs yet, and the hosted log is not anchored on mainnet yet.</p>
+          <p class="after">To cover more, keep production credentials out of the agent's environment, and put a gateway between the agent and the tools that touch production. The gateway is on the <a href="/advanced">advanced page</a>, and <a href="/guide/credential-custody">credential custody and egress lockdown</a> shows how to take away the routes around it. The <a href="/receipts/threat-model">threat model</a> lists what each part defends, and what it does not. No independent witness runs yet, and the hosted log is not anchored on mainnet yet.</p>
         </div>
       </section>
 

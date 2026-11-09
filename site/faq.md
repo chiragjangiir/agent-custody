@@ -15,6 +15,8 @@ The gateway is an MCP server that stands in front of your real tools. The agent'
 
 The gateway runs on your machines. Nothing in it phones home.
 
+The egress witness is a proxy too, for the connections a locked-down agent makes that are not tool calls. It relays them without TLS interception, so it records the destination, the times, and the byte counts, never what was sent. It sees nothing when lockdown is off, and it relays only HTTP. [Credential custody and egress lockdown](/guide/credential-custody) has the table of what it sees.
+
 ## What does a receipt contain? Is there personal data in it?
 
 A receipt records the call as the tool saw it: the tool name, the arguments the agent sent, the facts the gateway fetched itself, the policy decision with the policy's hash, the grant that authorized the agent, and, for a call that ran, the result the tool returned. Every field is labelled `attested`, `observed`, or `claimed`.
@@ -59,7 +61,7 @@ Yes. Set `"mode": "observe"` in the gateway or SDK config. Every call the grant 
 
 ## Why trust the enforcer?
 
-Three reasons, none of them "trust us". The gateway and the verifier are open source under Apache-2.0; read them. Policies are Cedar, the authorization language AWS built and formally verified, evaluated by its own engine; we do not interpret policies ourselves. And every receipt carries the SHA-256 of the policy text that decided it, so a verifier knows exactly which rules were in force, and the receipt format is published with 31 conformance vectors any second implementation must pass. The verifier's report also says what a receipt does not prove: an SDK receipt is the agent's own word, tamper-evident after issue, and the report prints that sentence.
+Three reasons, none of them "trust us". The gateway and the verifier are open source under Apache-2.0; read them. Policies are Cedar, the authorization language AWS built and formally verified, evaluated by its own engine, or Rego, compiled by Open Policy Agent's own `opa build` or answered by an OPA server you run; we do not interpret policies ourselves. And every receipt decided by a policy file carries the SHA-256 of the policy text that decided it, so a verifier knows exactly which rules were in force (an OPA server's receipt names the bundle revisions the server reported instead), and the receipt format is published with [conformance vectors](/receipt/vectors) any second implementation must pass. The verifier's report also says what a receipt does not prove: an SDK receipt is the agent's own word, tamper-evident after issue, and the report prints that sentence.
 
 ## How fast is it?
 
@@ -71,7 +73,7 @@ The receipt, which holds the arguments and the result, never leaves your machine
 
 ## Does the gateway call any AI service?
 
-No. Policy evaluation is Cedar, evaluated in the gateway's process. The only network calls it makes are the ones you configure: to your own tools, to the log you name, and to the exporters you turn on. It runs offline against local tools and a local log file.
+No. Policy evaluation is Cedar, or Rego compiled from a file, evaluated in the gateway's process. The only network calls it makes are the ones you configure: to your own tools, to the log you name, to an OPA server if you choose one, and to the exporters you turn on. It runs offline against local tools and a local log file.
 
 ## What about prompt injection?
 

@@ -4,11 +4,12 @@
 
 Chain of custody for AI agents: a signed receipt for every tool call, checkable with public keys alone. What each check proves, and against whom, is [a table below](#what-a-receipt-proves-and-what-it-does-not).
 
-Four producers, one receipt format, one verifier.
+Five producers, one receipt format, one verifier.
 
 - **The gateway** is an MCP proxy between an agent and the systems it can affect: MCP servers, REST APIs described as tools, and other agents it delegates to over A2A. For every tool call, allowed or denied, it checks a delegation grant signed by the human principal and any required human approval of the exact arguments, gathers the facts the policy needs by calling upstream itself, evaluates a Cedar or Rego policy that fails closed (Rego from a file or from your own OPA server), forwards the call only on allow, and emits a signed receipt appended to a Merkle transparency log.
 - **The door** is the gateway turned around: a reverse proxy in front of your own website, API, or forms. Every arrival, a browser, an API client, a crawler, or an agent, is classified by what it presented (a grant signed by a principal you trust makes it `verified`; an assertion the door cannot check is `claimed`; nothing is `unknown`), decided by a Cedar policy for its route, relayed or refused, and receipted either way with the same receipt. It is the first piece of an agent front door; it does not yet detect agents in web traffic, and says so ([the door](docs/door.md)).
 - **The egress witness** covers the calls that go around the gateway. Under egress lockdown, a locked-down agent's network reaches only the gateway and the witness. The witness is a forward proxy: it identifies the agent by the proxy credential it checked, lets a Cedar or Rego policy decide per destination, relays or refuses the connection, and receipts it either way (issuer kind `egress`). It records the destination, the times, and the byte counts. It never records a payload, because there is no TLS interception. It sees nothing when lockdown is off, and it relays no protocol other than HTTP. A receipt is an observed bypass, not a record of what was done.
+- **The ACS Guardian**, a spike, answers an agent that asks before it acts over the OWASP Agent Control Standard: it decides `steps/toolCallRequest` and `steps/toolCallResult` by a Cedar policy and receipts each decision (issuer kind `guardian`). It carries out nothing, and the agent chooses to ask and to obey, so a receipt proves the decision, not that the call ran or did not ([the ACS Guardian](docs/acs.md)).
 - **The SDK** is an interceptor inside the agent's own process, hooked into the framework's tool-call callbacks: Claude Code, the Claude Agent SDK, the OpenAI Agents SDK, the Vercel AI SDK, OpenClaw, DeepSeek Harness, Hermes, Google ADK, LangChain, or any function you wrap. It reaches everything the gateway cannot see and issues the same receipts, labelled as self-reported.
 
 Anyone holding the public keys can verify a receipt offline. The agent is not trusted. The layer around it is, and the receipt says exactly how far that trust extends, starting with who issued it. What the receipt file carries of a call is a choice per tool: a field can be withheld as a commitment or encrypted under your key, and the verifier recomputes the digests when it is shown the values.
@@ -107,18 +108,18 @@ flowchart LR
 
 Three parties hold keys. The **principal** signs a grant saying which agent may use which tools until when. The **issuer**, gateway or SDK, signs every receipt and every tree head. The **verifier** holds only public keys and needs no access to the issuer, the agent, or the upstream system.
 
-## Four producers, one receipt
+## Five producers, one receipt
 
-| | gateway | door | egress witness | SDK |
-| --- | --- | --- | --- | --- |
-| where it runs | separate process between agent and tools | separate process between the world and your own site or API | forward proxy in a locked-down agent's network path | inside the agent's process |
-| what it sees | MCP tool calls | every HTTP arrival, by route | each connection that does not go to the gateway: destination, times, byte counts, never the payload | whatever the framework's hooks expose |
-| enforcement | yes, denied calls never reach upstream | yes, refused arrivals never reach the origin | yes, refused connections are never opened; only under lockdown, since an agent can ignore the proxy | only where a hook can block |
-| provenance of its fields | `attested` and `observed` | `observed`; `attested` only when the arrival presented a grant, else `claimed` | `observed`; the agent is `observed` only through a proxy credential the witness checked, else `claimed` | `claimed`, all of them |
-| what a verifier learns | the agent could not skip or forge this | the arrival could not skip or forge this; who it was is proven only with a grant | the agent connected to this destination around the gateway; not what it sent | the agent's process reported this and it has not changed since |
-| install | one line in the host's MCP config | a reverse proxy in front of the origin | a forward proxy plus egress lockdown (`deploy/gateway/lockdown`) | a hook entry or a wrapped function |
+| | gateway | door | egress witness | ACS Guardian | SDK |
+| --- | --- | --- | --- | --- | --- |
+| where it runs | separate process between agent and tools | separate process between the world and your own site or API | forward proxy in a locked-down agent's network path | separate process the agent asks, one JSON-RPC document at a time | inside the agent's process |
+| what it sees | MCP tool calls | every HTTP arrival, by route | each connection that does not go to the gateway: destination, times, byte counts, never the payload | the tool-call requests and results the agent chooses to send | whatever the framework's hooks expose |
+| enforcement | yes, denied calls never reach upstream | yes, refused arrivals never reach the origin | yes, refused connections are never opened; only under lockdown, since an agent can ignore the proxy | no: it decides, and the agent honours the answer or not | only where a hook can block |
+| provenance of its fields | `attested` and `observed` | `observed`; `attested` only when the arrival presented a grant, else `claimed` | `observed`; the agent is `observed` only through a proxy credential the witness checked, else `claimed` | the decision and the policy `observed`; the agent, the tool, and the arguments `claimed` | `claimed`, all of them |
+| what a verifier learns | the agent could not skip or forge this | the arrival could not skip or forge this; who it was is proven only with a grant | the agent connected to this destination around the gateway; not what it sent | the Guardian made this decision on this request under this policy; not that the call ran | the agent's process reported this and it has not changed since |
+| install | one line in the host's MCP config | a reverse proxy in front of the origin | a forward proxy plus egress lockdown (`deploy/gateway/lockdown`) | `agent-custody acs --config acs.json`, or `createAcsGuardian` in code | a hook entry or a wrapped function |
 
-Every receipt names its issuer, and the verifier prints what that issuer kind is worth before anything else. A dashboard full of `sdk` rows is the reason to route the consequential calls through the gateway. The door is the gateway turned around ([the door](docs/door.md)). The egress witness receipts the connections that go around the gateway ([the egress witness](docs/egress.md)).
+Every receipt names its issuer, and the verifier prints what that issuer kind is worth before anything else. A dashboard full of `sdk` rows is the reason to route the consequential calls through the gateway. The door is the gateway turned around ([the door](docs/door.md)). The egress witness receipts the connections that go around the gateway ([the egress witness](docs/egress.md)). The ACS Guardian receipts the decisions it gives an agent that asks ([the ACS Guardian](docs/acs.md)).
 
 ### Supported hosts and frameworks
 
@@ -315,7 +316,7 @@ docs/              tutorials, usage (gateway), codex-recovery (live demo), appro
 
 ## Plan
 
-The design is three producers feeding one verifier. The SDK is the top of the funnel: cheap to install, wide reach, honest about being self-reported. The gateway is what a security or compliance owner mandates for consequential actions. The door turns the gateway around, in front of the business's own surface. The egress witness receipts what goes around the gateway. All four exist; the work is widening each, and the door's next steps are detection signals with published error rates and standards-based passports (RFC 9421, AP2).
+The design is several producers feeding one verifier. The SDK is the top of the funnel: cheap to install, wide reach, honest about being self-reported. The gateway is what a security or compliance owner mandates for consequential actions. The door turns the gateway around, in front of the business's own surface. The egress witness receipts what goes around the gateway. The ACS Guardian, a spike, receipts the decisions it gives an agent that asks before it acts. All five exist; the work is widening each, and the door's next steps are detection signals with published error rates and standards-based passports (RFC 9421, AP2).
 
 **Done**
 

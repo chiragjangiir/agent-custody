@@ -1,6 +1,6 @@
 # Architecture
 
-How agent-custody is put together, what runs on the customer's side, what runs on ours, and what changes in the agent. The diagrams are the maps; [Deployment](/guide/deployment) says what each setup proves, and [What each piece is for](/guide/pieces) says when to turn each one on.
+How agent-custody is put together, what runs on the customer's side, what runs on ours, and what changes in the agent. The diagrams are the maps; [What each piece is for](/guide/pieces) says when to turn each one on and what each setup leaves you trusting, and [Deployment](/guide/deployment) says where each piece runs and what it does not cover.
 
 ## The split in one picture
 
@@ -122,9 +122,9 @@ An admin console runs from the same image as a separate service, with a token of
 | uses MCP tool servers | name the gateway where the host named the tool server, and remove the direct route | enforcement: a denied call never reaches the tool, and the record is `observed` |
 | calls a REST API | describe the endpoints as tools in the gateway config; the credential moves to the gateway | the same, for REST |
 | plain function tools | wrap them with the framework adapter, or send them through the sidecar | a record only: every field is `claimed`, because the process describes itself |
-| any agent | take tool credentials out of the agent's environment | the gateway cannot be bypassed |
+| any agent | take tool credentials out of the agent's environment, and lock down its egress | the gateway cannot be bypassed with a tool credential, and each connection around it goes through the egress witness |
 
-The agent never calls agent-custody. If it holds a credential of its own, nothing here sees what it does with it.
+The agent never calls agent-custody. If it holds a credential of its own, the gateway does not see what it does with it. Under lockdown, the egress witness records where the agent connected and how much it sent, never what. [Credential custody and egress lockdown](/guide/credential-custody) has the steps.
 
 ## The pieces and how they depend on each other
 
@@ -374,12 +374,12 @@ sequenceDiagram
 
 ## What this does and does not cover
 
-- **Only calls through the gateway.** A credential in the agent's environment, a second direct route in the host config, or code that calls an API on its own is outside it. Taking those away is a deployment decision: [credential custody and lockdown](/guide/credential-custody) shows how, and the egress witness receipts the direct connections that remain.
+- **Only calls through the gateway.** A credential in the agent's environment, a second direct route in the host config, or code that calls an API on its own is outside it. [Deployment](/guide/deployment#what-the-gateway-does-not-cover) lists each route and its fix.
 - **The SDK and sidecar record, they do not prove.** They run in the process they describe, so their receipts are `claimed`.
 - **The hosted log does not see grants or policy.** It sees leaf hashes. A receipt names the grant and carries the policy digest, and a verifier checks both against public keys.
 - **The operator can rewrite a local log.** A remote log, published checkpoints, and a witness are what detect that. The witness ships in the package, but a second, independent operator for our log is still being sought, so today the checkpoints are published and the witness step is not yet independent.
 - **There is no hosted control plane yet.** Grants, revocation and Cedar policy are managed on the customer's gateway; the portal manages the log, tokens, usage and billing.
 - **Failure mode:** a `precommit` tool is withheld while the log is unreachable. That is deliberate and it is a denial of service on the agent.
-- **Egress is witnessed only under lockdown, and never inspected.** The [egress witness](/receipts/egress) is a forward proxy. It receipts, and decides by policy, the connections an agent makes around the gateway. It records the destination, the times, and the byte counts. It never records the payload, because there is no TLS interception, so a receipt shows an observed bypass, not what was done. It sees only traffic sent to it: with no [lockdown](/guide/credential-custody), an agent can ignore `HTTPS_PROXY`, and a protocol other than HTTP never reaches it.
+- **Egress is witnessed only under lockdown, and never inspected.** The [egress witness](/receipts/egress) receipts, and decides by policy, the connections an agent makes around the gateway: the destination, the times, and the byte counts, never the payload, since there is no TLS interception. A receipt shows an observed bypass, not what was done. With no [lockdown](/guide/credential-custody), an agent can ignore `HTTPS_PROXY`, and a protocol other than HTTP never reaches the witness.
 
 See [the threat model](/receipts/threat-model) for who could make a receipt false and what stops them, and [the hosted log reference](/reference/hosted) for the log's routes.
