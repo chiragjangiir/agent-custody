@@ -20,7 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: svayatta/agent-custody@<commit sha of the release> # 0.16.1
+      - uses: svayatta/agent-custody@<commit sha of the release> # 0.16.2
         with:
           path: .custody/receipts
           issuer-key: .custody/keys/agent.pub
@@ -37,7 +37,7 @@ Pin the action to the commit of a release, as you pin every other action. A movi
 | `principal-key` | the public key files of the principals whose grants a gateway receipt carries, one path on each line; SDK and Claude Code hook receipts need none | |
 | `log-url` | the URL of the log; the action fetches the log key from it (`verify --log-url`) | |
 | `log-id` | the id that every tree head must name (`verify --log-id`) | |
-| `version` | the `@agent-custody/receipts` version that `npx` runs | `0.16.1` |
+| `version` | the `@agent-custody/receipts` version that `npx` runs | `0.16.2` |
 | `github-token` | a token that can write pull request comments; an empty value writes the job summary only | `github.token` |
 | `comment-author` | the login of the account that `github-token` posts as; the action edits only a comment from this account | `github-actions[bot]` |
 

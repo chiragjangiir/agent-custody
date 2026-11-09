@@ -1,6 +1,6 @@
 [project]
 name = "agent-custody"
-version = "0.16.1"
+version = "0.16.2"
 description = "Proof of what your AI agents did. Give your agents real power, without losing control of them. The Python client of the agent-custody sidecar."
 readme = "README.md"
 license = "Apache-2.0"
