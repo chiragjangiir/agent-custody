@@ -6,7 +6,20 @@
 
 Give your agents real power, without losing control of them. Your policy checks your agent's actions before they run. What it forbids does not run. Each action that it checks leaves a signed receipt that anyone can verify.
 
-[![The product overview film, 93 seconds: the problem, the gateway, and a refund agent caught by a prompt injection, then the audit](site/public/promo-poster.jpg)](https://agent-custody.dev/advanced#product-overview-film)
+[![A refund agent is fooled by a prompt injection and tries a £5,000 refund. The gateway denies it before it reaches Stripe, signs a receipt, and an auditor verifies the receipt with public keys.](site/public/promo.gif)](https://agent-custody.dev/advanced#product-overview-film)
+
+*An agent was fooled. The gateway was not, and an auditor can prove it. [Watch the full 93-second film with sound](https://agent-custody.dev/advanced#product-overview-film).*
+
+agent-custody is infrastructure to authorize the actions of AI agents and to account for them:
+
+- **A gateway** between your agents and their tools: MCP servers, REST APIs, and other agents over A2A. A person signs a grant that names the agent, its tools, and how long it may act.
+- **Cedar or Rego policy** decides each call before the tool runs. The policy reads facts that the gateway looks up itself, not what the agent claims.
+- **Signed receipts and a Merkle transparency log.** Each call gets a receipt, allowed or denied. A rewrite of the log is detectable.
+- **Offline verification.** An auditor or a counterparty checks a receipt with public keys only.
+- **Governed memory.** Each belief of an agent cites the receipt that produced it, and a wrong belief can be traced and retracted.
+- **Integrations:** Claude Code, the Claude Agent SDK, the OpenAI Agents SDK, the Vercel AI SDK, LangChain, CrewAI, Google ADK, and clients in Python, Go, Java, and Rust.
+
+The fastest way to try it is [the Claude Code hook](#start-with-a-coding-agent): one command. Before you rely on any part, read [the threat model](packages/receipts/docs/threat-model.md). It lists what each part defends, and what it does not.
 
 ## How it works
 
@@ -25,12 +38,31 @@ agent ── action ──► hook or gateway ── allowed ──► tool: she
 
 There are two ways to start:
 
-| | Coding agents | Agents that move money |
+| | Agents that move money | Coding agents |
 | --- | --- | --- |
-| What runs | a hook inside Claude Code | a gateway between the agent and its tools |
-| Try it | `agent-custody init claude-code` | `bun run demo` |
-| What it stops in the example | force push, `rm -rf` on `/` and `~`, `terraform destroy`, `drop database` | a refund over the limit, a refund to an unverified customer, a payout outside the grant |
-| Read on | [Start with a coding agent](#start-with-a-coding-agent) | [Agents that move money](#agents-that-move-money) |
+| What runs | a gateway between the agent and its tools | a hook inside Claude Code |
+| Try it | `bun run demo` | `agent-custody init claude-code` |
+| What it stops in the example | a refund over the limit, a refund to an unverified customer, a payout outside the grant | force push, `rm -rf` on `/` and `~`, `terraform destroy`, `drop database` |
+| Read on | [Agents that move money](#agents-that-move-money) | [Start with a coding agent](#start-with-a-coding-agent) |
+
+## Agents that move money
+
+A support agent issues refunds through the gateway, against a test Stripe server. A person signed the agent's grant. The policy reads facts that the gateway looks up itself, not what the agent claims.
+
+```bash
+git clone https://github.com/svayatta/agent-custody
+cd agent-custody && bun install && bun run demo
+```
+
+- A £500 refund to a verified customer runs.
+- A £5,000 refund is refused: it is over the policy limit.
+- A £500 refund to an unverified customer is refused. The gateway looked up the customer itself.
+- A payout is refused: the tool is not in the grant.
+- An auditor verifies all four receipts with public keys and a copy of the log. Then someone edits the first receipt to make the refund look smaller, and the verification fails.
+
+The demo needs Node 22 and Bun. The [refund demo](site/advanced.md#the-refund-demo) shows the output step by step. For production payments, read [safe financial operations](packages/receipts/docs/financial-operations.md) (budgets, idempotency, and reconciliation with the provider), [human approvals](packages/receipts/docs/approvals.md) (one or two people approve the exact payment), and [completeness](packages/receipts/docs/completeness.md) (the provider's records matched against the receipts, so an action that went around the gateway shows up).
+
+The gateway covers only the calls that go through it. A credential in the agent's own environment goes around it. The [threat model](packages/receipts/docs/threat-model.md) lists the other limits.
 
 ## Start with a coding agent
 
@@ -98,23 +130,6 @@ The hook stops a shell command, a file edit, or an MCP tool call that the agent 
 - **The record is the agent's own report.** Every field is `claimed`. The signature shows that the record did not change after the hook wrote it. It does not show that the hook saw every call.
 
 To cover more, keep production credentials out of the agent's environment, and put a gateway between the agent and the tools that touch production. The [threat model](packages/receipts/docs/threat-model.md) lists what each part defends, and what it does not. No independent witness runs yet, and the hosted log is not anchored on mainnet yet.
-
-## Agents that move money
-
-A support agent issues refunds through the gateway, against a test Stripe server. A person signed the agent's grant. The policy reads facts that the gateway looks up itself, not what the agent claims.
-
-```bash
-git clone https://github.com/svayatta/agent-custody
-cd agent-custody && bun install && bun run demo
-```
-
-- A £500 refund to a verified customer runs.
-- A £5,000 refund is refused: it is over the policy limit.
-- A £500 refund to an unverified customer is refused. The gateway looked up the customer itself.
-- A payout is refused: the tool is not in the grant.
-- An auditor verifies all four receipts with public keys and a copy of the log. Then someone edits the first receipt to make the refund look smaller, and the verification fails.
-
-The demo needs Node 22 and Bun. The [refund demo](site/advanced.md#the-refund-demo) shows the output step by step. For production payments, read [safe financial operations](packages/receipts/docs/financial-operations.md) (budgets, idempotency, and reconciliation with the provider), [human approvals](packages/receipts/docs/approvals.md) (one or two people approve the exact payment), and [completeness](packages/receipts/docs/completeness.md) (the provider's records matched against the receipts, so an action that went around the gateway shows up).
 
 ## Advanced
 
@@ -253,6 +268,8 @@ A Claude Code session in this repository can run under custody. On a machine wit
 ## Security
 
 Report a vulnerability privately to partha@charioteerconsulting.com; [SECURITY.md](SECURITY.md) has the scope, the response times, and how keys and tokens are protected.
+
+The [threat model](packages/receipts/docs/threat-model.md) lists what each part defends, and what it does not. The limits of the Claude Code hook are in [What the hook does not stop](#what-the-hook-does-not-stop).
 
 ## Working in the repository
 
