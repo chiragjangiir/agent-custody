@@ -22,7 +22,7 @@ inputs:
     default: ""
   version:
     description: The version of @agent-custody/receipts to run. The action runs it with npx.
-    default: 0.15.0
+    default: 0.16.0
   github-token:
     description: A token that can write pull request comments. Without that right, the action writes the job summary only.
     default: ${{ github.token }}

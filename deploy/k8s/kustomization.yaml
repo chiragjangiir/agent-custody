@@ -15,4 +15,4 @@ resources:
   - ingress.yaml
 images:
   - name: ghcr.io/svayatta/agent-custody-log
-    newTag: "0.15.0"
+    newTag: "0.16.0"
