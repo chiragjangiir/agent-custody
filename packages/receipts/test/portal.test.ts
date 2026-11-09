@@ -112,6 +112,8 @@ describe("the tenant portal", () => {
     const page = await pageRes.text();
     // the page's own script must parse: a quote escaped once inside the TypeScript template literal once left the page blank
     for (const m of page.matchAll(/<script>([\s\S]*?)<\/script>/g)) new Script(m[1]!);
+    // browsers compile a pattern attribute with the v flag, and drop one that does not compile
+    for (const m of page.matchAll(/ pattern="([^"]*)"/g)) new RegExp(`^(?:${m[1]})$`, "v");
     expect(pageRes.headers.get("content-security-policy")).toContain("img-src 'self'");
     expect(page).toContain('data-view="setup"');
     expect(page).toContain('rel="icon" href="/favicon.svg"');

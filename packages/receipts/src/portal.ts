@@ -648,7 +648,7 @@ export function portalHandler(o: PortalOptions): (req: IncomingMessage, res: Ser
     };
     const page = (status: number, title: string, body: string, headers: Record<string, string | string[]> = {}) => {
       res.writeHead(status, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'", ...headers });
-      res.end(`<!doctype html><meta charset="utf-8"><title>${title}</title><p style="font:15px system-ui;padding:2rem">${body}</p>`);
+      res.end(resultPage(title, `<p>${body}</p>`));
     };
     const esc = (v: string) => v.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
     const setCookie = (value: string | null) => `${cookieName}=${value ?? ""}; Path=/; HttpOnly; SameSite=Strict${o.trustProxy ? "; Secure" : ""}; Max-Age=${value ? 14 * 86_400 : 0}`;
@@ -661,7 +661,7 @@ export function portalHandler(o: PortalOptions): (req: IncomingMessage, res: Ser
     // would not carry it. The page's own navigation to / does.
     const signedInPage = (who: string, next: string, setCookies: string[], lead: string) => {
       res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "set-cookie": setCookies, "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'" });
-      res.end(`<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=${next}"><title>Signed in</title><p style="font:15px system-ui;padding:2rem">${lead} ${esc(who)}. <a href="${next}">Continue</a>.</p>`);
+      res.end(resultPage("Signed in", `<p>${lead} ${esc(who)}. <a href="${next}">Continue</a>.</p>`, `<meta http-equiv="refresh" content="0;url=${next}">`));
     };
     const enforcedFor = async (id: string) => {
       const t = await store.tenantOf(id);
@@ -797,7 +797,7 @@ export function portalHandler(o: PortalOptions): (req: IncomingMessage, res: Ser
         // Opening the link proves nothing: an attacker may have registered the address, and its owner may click the link. Only the account's own session confirms it, through POST /api/verify-email.
         const token = url.searchParams.get("token")!;
         res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'" });
-        return void res.end(`<!doctype html><meta charset="utf-8"><title>Confirm your address</title><p style="font:15px system-ui;padding:2rem" id="m">Confirming ${esc(u.email)}...</p><script>
+        return void res.end(`${resultPage("Confirm your address", `<p id="m" aria-live="polite">Confirming ${esc(u.email)}...</p>`)}<script>
 fetch("/api/verify-email", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ token: ${JSON.stringify(token).replace(/</g, "\\u003c")} }) }).then(async (r) => {
   const b = await r.json().catch(() => ({}));
   const m = document.getElementById("m");
@@ -1190,15 +1190,34 @@ export function servePortal(o: PortalOptions, opts: { port: number; host?: strin
 // ---- the page: one file, no framework, no outside requests ----
 const FAVICON = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#b45309"/><path d="M19 11H45V45L41.75 48 38.5 45 35.25 48 32 45 28.75 48 25.5 45 22.25 48 19 45Z" fill="#fff"/><path d="M25 20h14M25 27h14" stroke="#b45309" stroke-width="2.6" stroke-linecap="round"/><path d="M25 37.5l5 4.5 9.5-10" fill="none" stroke="#b45309" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
+const MARK = '<svg class="mark" viewBox="0 0 64 64" aria-hidden="true"><rect class="tile" width="64" height="64" rx="14"/><path d="M19 11H45V45L41.75 48 38.5 45 35.25 48 32 45 28.75 48 25.5 45 22.25 48 19 45Z" fill="#fff"/><path class="ink" d="M25 20h14M25 27h14" stroke-width="2.6" stroke-linecap="round"/><path class="ink" d="M25 37.5l5 4.5 9.5-10" fill="none" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+// The small pages outside the app (errors, results, the address check) share the brand without the app's script.
+const RESULT_STYLE = `<style>
+  :root { color-scheme: light dark; --ink: #1b2430; --ink2: #5b6b7a; --line: #d7dfe5; --bg: #f5f7f9; --panel: #ffffff; --accent: #b45309; --accent-bg: #fbf1dc; }
+  @media (prefers-color-scheme: dark) { :root { --ink: #e6ecf0; --ink2: #9fb0bd; --line: #27333c; --bg: #0e1418; --panel: #151d23; --accent: #f59e0b; --accent-bg: #2d2412; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 1.5rem .75rem; color: var(--ink); font: 15px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif; background-color: var(--bg); background-image: radial-gradient(56rem 26rem at 50% -8rem, var(--accent-bg), transparent 72%), radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--ink2) 20%, transparent) 1px, transparent 0); background-size: 100% 100%, 22px 22px; background-repeat: no-repeat, repeat; }
+  main { position: relative; width: 100%; max-width: 27rem; padding: 2rem 2.25rem; background: var(--panel); border: 1px solid var(--line); border-top: 4px solid var(--accent); border-radius: 14px; box-shadow: 0 1px 2px rgb(0 0 0 / .05), 0 18px 40px -18px rgb(0 0 0 / .25); }
+  .brand { display: inline-flex; align-items: center; gap: .55rem; margin: 0 0 1.25rem; color: var(--ink); font-weight: 700; letter-spacing: .04em; text-decoration: none; }
+  .mark { width: 28px; height: 28px; display: block; } .mark .tile { fill: var(--accent); } .mark .ink { stroke: var(--accent); }
+  h1 { margin: 0 0 .5rem; font-size: 1.4rem; line-height: 1.25; letter-spacing: -.02em; }
+  p { margin: 0; color: var(--ink2); overflow-wrap: anywhere; }
+  a { color: var(--accent); font-weight: 600; text-underline-offset: 3px; } a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+  @media (max-width: 30rem) { main { padding: 1.5rem 1.25rem; } }
+</style>`;
+const resultPage = (title: string, body: string, head = "") =>
+  `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">${head}<title>${title}</title>${RESULT_STYLE}<main><a class="brand" href="/">${MARK}agent-custody</a><h1>${title}</h1>${body}</main>`;
+
 const PORTAL_PAGE = `<!doctype html>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>agent-custody</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <script>(() => { try { const t = localStorage.getItem("agent-custody-theme"); if (t === "dark" || t === "light") document.documentElement.dataset.theme = t; } catch {} })();</script>
 <style>
-  :root { color-scheme: light dark; --ink: #1b2430; --ink2: #5b6b7a; --line: #d7dfe5; --bg: #f5f7f9; --panel: #ffffff; --accent: #b45309; --accent-bg: #fbf1dc; --warn: #8a5a00; --bad: #b3261e; --ok: #1f7a4d; --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
-  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --ink: #e6ecf0; --ink2: #9fb0bd; --line: #27333c; --bg: #0e1418; --panel: #151d23; --accent: #f59e0b; --accent-bg: #2d2412; --warn: #e2b862; --bad: #ff8a80; --ok: #6fd39a; } }
-  :root[data-theme="dark"] { --ink: #e6ecf0; --ink2: #9fb0bd; --line: #27333c; --bg: #0e1418; --panel: #151d23; --accent: #f59e0b; --accent-bg: #2d2412; --warn: #e2b862; --bad: #ff8a80; --ok: #6fd39a; }
+  :root { color-scheme: light dark; --ink: #1b2430; --ink2: #5b6b7a; --line: #d7dfe5; --bg: #f5f7f9; --panel: #ffffff; --accent: #b45309; --accent-bg: #fbf1dc; --warn: #8a5a00; --bad: #b3261e; --ok: #1f7a4d; --accent-ink: #ffffff; --accent-hover: #92400e; --field: #a9b4bd; --lift: 0 1px 2px rgb(0 0 0 / .04); --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --ink: #e6ecf0; --ink2: #9fb0bd; --line: #27333c; --bg: #0e1418; --panel: #151d23; --accent: #f59e0b; --accent-bg: #2d2412; --warn: #e2b862; --bad: #ff8a80; --ok: #6fd39a; --accent-ink: #1c1917; --accent-hover: #fbbf24; --field: #3d4c57; --lift: none; } }
+  :root[data-theme="dark"] { --ink: #e6ecf0; --ink2: #9fb0bd; --line: #27333c; --bg: #0e1418; --panel: #151d23; --accent: #f59e0b; --accent-bg: #2d2412; --warn: #e2b862; --bad: #ff8a80; --ok: #6fd39a; --accent-ink: #1c1917; --accent-hover: #fbbf24; --field: #3d4c57; --lift: none; }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
   .top { display: flex; align-items: center; gap: 1rem; padding: .7rem 1.25rem; border-bottom: 1px solid var(--line); background: var(--panel); }
@@ -1207,102 +1226,191 @@ const PORTAL_PAGE = `<!doctype html>
   .top .who { color: var(--ink2); font-size: .9rem; margin-left: .5rem; }
   button.theme { background: transparent; color: var(--ink2); border: 1px solid var(--line); padding: .25rem .6rem; font-size: .8rem; border-radius: 4px; } button.theme:hover { color: var(--ink); }
   .pill { display: inline-block; padding: .05rem .5rem; border-radius: 999px; font: 600 .72rem/1.6 var(--mono); letter-spacing: .06em; text-transform: uppercase; background: var(--accent-bg); color: var(--accent); }
-  .notice { margin: 0 auto; max-width: 72rem; padding: .6rem 1.5rem; font-size: .9rem; color: var(--ink); background: var(--accent-bg); border-bottom: 1px solid var(--line); } .notice a, .notice button { margin-left: .6rem; } .notice button { font: inherit; background: none; border: 1px solid var(--line); border-radius: 4px; padding: .1rem .5rem; color: var(--ink); cursor: pointer; }
+  .notice { padding: .6rem 1.25rem; font-size: .9rem; color: var(--ink); background: var(--accent-bg); border-bottom: 1px solid var(--line); } .notice a, .notice button { margin-left: .6rem; } .notice button { font: inherit; background: none; border: 1px solid var(--line); border-radius: 4px; padding: .1rem .5rem; color: var(--ink); cursor: pointer; }
+  .notice button:hover { background: var(--panel); border-color: var(--line); }
+  a { color: var(--accent); text-underline-offset: 3px; }
+  a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .layout { display: grid; grid-template-columns: 15rem 1fr; min-height: calc(100vh - 3.3rem); }
   nav { border-right: 1px solid var(--line); background: var(--panel); padding: 1rem 0; }
   nav .group { font: 600 .68rem/1.4 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--accent); padding: 1rem 1.25rem .35rem; }
-  nav a { display: flex; justify-content: space-between; padding: .45rem 1.25rem; color: var(--ink); text-decoration: none; border-left: 3px solid transparent; }
-  nav a.on { border-left-color: var(--accent); background: var(--accent-bg); }
+  nav a { display: flex; justify-content: space-between; gap: .5rem; padding: .45rem 1.25rem; color: var(--ink); text-decoration: none; border-left: 3px solid transparent; }
+  nav a:hover { background: var(--bg); } nav a.on { border-left-color: var(--accent); background: var(--accent-bg); font-weight: 600; }
   nav a span.n { color: var(--ink2); font-family: var(--mono); font-size: .8rem; }
-  main { padding: 1.5rem; max-width: 72rem; }
-  h1 { font-size: 1.25rem; margin: 0 0 1rem; } h2 { font: 600 .72rem/1.4 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--ink2); margin: 1.5rem 0 .6rem; }
+  main { padding: 2rem 2rem 3rem; max-width: 72rem; min-width: 0; }
+  h1 { font-size: 1.5rem; letter-spacing: -.02em; margin: 0 0 1rem; } h2 { font: 600 .72rem/1.4 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--ink2); margin: 1.5rem 0 .6rem; }
   .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); gap: .9rem; }
-  .card { background: var(--panel); border: 1px solid var(--line); border-top: 3px solid var(--accent); border-radius: 6px; padding: 1rem 1.1rem; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-top: 3px solid var(--accent); border-radius: 10px; box-shadow: var(--lift); padding: 1rem 1.1rem; }
   .card.warn { border-top-color: var(--warn); } .card.bad { border-top-color: var(--bad); } .card.ok { border-top-color: var(--ok); }
   .card .k { font: 600 .68rem/1.4 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--ink2); }
   .card .v { font-size: 1.9rem; font-weight: 700; margin: .2rem 0 0; font-variant-numeric: tabular-nums; }
   .card .s { color: var(--ink2); font-size: .88rem; }
-  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 1rem 1.1rem; margin-top: .9rem; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 1rem 1.25rem; margin-top: .9rem; box-shadow: var(--lift); overflow-x: auto; } .panel > h2:first-child { margin-top: 0; }
   table { border-collapse: collapse; width: 100%; font-size: .92rem; }
-  th, td { text-align: left; padding: .45rem .5rem .45rem 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th, td { text-align: left; padding: .55rem .75rem .55rem 0; border-bottom: 1px solid var(--line); vertical-align: middle; } tbody tr:last-child > * { border-bottom: 0; }
+  td button:not(.link) { padding: .25rem .7rem; font-size: .85rem; } td select { padding: .3rem .5rem; }
+  #audit td:nth-child(-n+3) { white-space: nowrap; } #audit td:last-child { min-width: 16rem; overflow-wrap: anywhere; font-size: .86rem; }
   th { font: 600 .68rem/1.4 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--ink2); }
   code, pre, .mono { font-family: var(--mono); font-size: .86em; }
-  pre { background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: .8rem .9rem; overflow-x: auto; white-space: pre-wrap; }
+  pre { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: .8rem .9rem; overflow-x: auto; white-space: pre-wrap; }
   .bars { display: grid; grid-template-columns: repeat(6, 1fr); gap: .6rem; align-items: end; height: 9rem; }
   .bar { display: flex; flex-direction: column; justify-content: flex-end; align-items: center; height: 100%; font-size: .75rem; color: var(--ink2); }
-  .bar i { display: block; width: 70%; background: var(--accent); border-radius: 3px 3px 0 0; min-height: 2px; }
+  .bar i { display: block; width: 70%; max-width: 4rem; background: var(--accent); border-radius: 3px 3px 0 0; min-height: 2px; }
   .bar b { font-family: var(--mono); font-weight: 400; margin-top: .3rem; }
   label { display: grid; gap: .25rem; font-size: .85rem; color: var(--ink2); margin: 0 0 .8rem; }
   label .opt { font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; margin-left: .3rem; } label .hint { font-size: .8rem; line-height: 1.45; } label .hint code { font-family: var(--mono); font-size: .9em; }
-  textarea { font: .86rem/1.5 var(--mono); padding: .5rem .6rem; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); color: var(--ink); width: 100%; box-sizing: border-box; }
-  input, select { font: inherit; padding: .5rem .6rem; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); color: var(--ink); }
-  button { font: inherit; padding: .5rem .9rem; border-radius: 4px; border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer; }
-  button.quiet { background: transparent; color: var(--accent); }
-  button.link { background: none; border: 0; padding: 0; color: var(--accent); text-decoration: underline; }
-  .auth { max-width: 26rem; margin: 4rem auto; }
-  .auth.wide { max-width: 44rem; }
-  .providers { display: grid; gap: .5rem; margin: 0 0 1rem; } .providers a { display: block; text-align: center; padding: .55rem .9rem; border: 1px solid var(--line); border-radius: 4px; background: var(--panel); color: var(--ink); text-decoration: none; font-weight: 600; }
-  .providers a:hover { border-color: var(--accent); } .or { text-align: center; color: var(--ink2); font-size: .82rem; margin: 0 0 .8rem; }
+  textarea { font: .86rem/1.5 var(--mono); padding: .5rem .6rem; width: 100%; }
+  input, select { font: inherit; padding: .5rem .6rem; }
+  input, select, textarea { border: 1px solid var(--field); border-radius: 8px; background: var(--bg); color: var(--ink); transition: border-color .15s, box-shadow .15s; }
+  input::placeholder, textarea::placeholder { color: var(--ink2); opacity: .8; }
+  input:focus, select:focus, textarea:focus { outline: 2px solid transparent; border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent); }
+  button { font: inherit; font-weight: 600; padding: .5rem .9rem; border-radius: 8px; border: 1px solid var(--accent); background: var(--accent); color: var(--accent-ink); cursor: pointer; transition: background-color .15s, border-color .15s; }
+  button:not(.quiet, .link, .theme):hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+  button.quiet { background: transparent; color: var(--accent); } button.quiet:hover { background: var(--accent-bg); }
+  button.link { background: none; border: 0; padding: 0; color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
+  button:disabled { opacity: .55; cursor: default; }
+  body:has(> .auth:not([hidden])) { min-height: 100vh; background-color: var(--bg); background-image: radial-gradient(56rem 26rem at 50% -8rem, var(--accent-bg), transparent 72%), radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--ink2) 20%, transparent) 1px, transparent 0); background-size: 100% 100%, 22px 22px; background-repeat: no-repeat, repeat; }
+  .auth { --pad: 2.25rem; position: relative; max-width: 27rem; margin: 3.5rem auto 4rem; padding: var(--pad) var(--pad) 1.75rem; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 1px 2px rgb(0 0 0 / .05), 0 18px 40px -18px rgb(0 0 0 / .25); }
+  .auth::before { content: ""; position: absolute; top: -1px; left: -1px; right: -1px; height: 4px; border-radius: 14px 14px 0 0; background: var(--accent); }
+  #onboard { max-width: 31rem; } .auth.wide { max-width: 44rem; }
+  .auth.split { padding: 0; } .auth.split > .pane { padding: var(--pad) var(--pad) 1.75rem; } .pitch { display: none; }
+  .pitch .eyebrow { color: #f59e0b; }
+  .pitch h2 { margin: 0 0 1rem; font: 700 2rem/1.15 system-ui, -apple-system, "Segoe UI", sans-serif; letter-spacing: -.025em; text-transform: none; color: #fff; }
+  .pitch > p { margin: 0 0 2rem; max-width: 30rem; color: #9fb0bd; }
+  .flow { list-style: none; counter-reset: flow; display: grid; gap: 1.1rem; margin: 0; padding: 0; }
+  .flow li { counter-increment: flow; display: grid; grid-template-columns: 2rem 1fr; gap: .1rem .85rem; }
+  .flow li::before { content: counter(flow); grid-row: span 2; display: grid; place-items: center; width: 2rem; height: 2rem; border: 1px solid rgb(255 255 255 / .2); border-radius: 50%; color: #9fb0bd; font: 700 .8rem var(--mono); }
+  .flow li.now::before { background: #f59e0b; border-color: #f59e0b; color: #1c1917; }
+  .flow b { color: #fff; font-weight: 600; } .flow span { color: #9fb0bd; font-size: .9rem; }
+  @media (min-width: 60rem) {
+    .auth.split { display: grid; grid-template-columns: minmax(0, 1fr) 27rem; max-width: 64rem; overflow: hidden; }
+    #onboard.split { grid-template-columns: minmax(0, 1fr) 31rem; max-width: 68rem; }
+    .pitch { display: flex; flex-direction: column; justify-content: center; padding: 3rem; background: radial-gradient(circle at 1px 1px, rgb(255 255 255 / .07) 1px, transparent 0) 0 0 / 22px 22px, linear-gradient(160deg, #1f2a35, #0e1418); }
+    #onboard .pitch { justify-content: flex-start; padding-top: 4.5rem; }
+    .split .fine { border-radius: 0; }
+    .auth.wide { display: grid; grid-template-columns: 21rem minmax(0, 1fr); gap: 0 2.5rem; align-items: start; max-width: 72rem; }
+    .wide .side { position: sticky; top: 1.5rem; } .wide #firstSetup > .step:first-child { border-top: 0; padding-top: 0; }
+  }
+  .auth .mark { display: block; width: 40px; height: 40px; margin: 0 0 1rem; } .mark .tile { fill: var(--accent); } .mark .ink { stroke: var(--accent); }
+  .auth .eyebrow { margin: 0 0 .3rem; font: 600 .7rem/1.4 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--accent); }
+  .auth h1 { font-size: 1.6rem; line-height: 1.2; letter-spacing: -.02em; margin: 0 0 1.5rem; }
+  .auth h1 + .muted { margin-top: -.75rem; }
+  .auth label { color: var(--ink); font-weight: 600; font-size: .85rem; gap: .4rem; margin: 0 0 1rem; }
+  .auth label { position: relative; } .auth label .opt { position: absolute; top: .1rem; right: 0; margin: 0; }
+  .auth label .opt, .auth label .hint { font-weight: 400; color: var(--ink2); }
+  .auth input, .auth select { width: 100%; min-height: 2.75rem; padding: .6rem .8rem; font-size: 1rem; font-weight: 400; }
+  .auth form > button[type="submit"] { display: block; width: 100%; min-height: 2.75rem; margin-top: .25rem; }
+    .providers { display: grid; gap: .6rem; margin: 0 0 1.25rem; }
+  .providers a { display: flex; align-items: center; justify-content: center; gap: .6rem; min-height: 2.75rem; padding: .55rem .9rem; border: 1px solid var(--field); border-radius: 8px; background: var(--panel); color: var(--ink); text-decoration: none; font-weight: 600; transition: border-color .15s, background-color .15s; }
+  .providers a:hover { border-color: var(--accent); background: var(--bg); } .providers svg { width: 18px; height: 18px; flex: none; }
+  .or { display: flex; align-items: center; gap: .75rem; margin: .4rem 0 0; color: var(--ink2); font-size: .75rem; letter-spacing: .08em; text-transform: uppercase; }
+  .or::before, .or::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+  #authNote { margin: 1rem 0 0; padding: .65rem .85rem; border-radius: 8px; background: var(--accent-bg); color: var(--ink); font-size: .88rem; }
+  #ssoForm { margin-top: 1.5rem; padding-top: 1.25rem; border-top: 1px solid var(--line); } #ssoForm button { margin-top: .25rem; }
+  .auth .swap { text-align: center; margin: 1.25rem 0 0; }
+  .auth .fine { margin: 1.5rem calc(-1 * var(--pad)) -1.75rem; padding: 1rem var(--pad); border-top: 1px solid var(--line); border-radius: 0 0 14px 14px; background: var(--bg); font-size: .82rem; line-height: 1.55; }
+  .auth .msg { min-height: 0; margin: .75rem 0 0; font-size: .9rem; } .auth .msg:empty { margin: 0; }
+  .auth .msg.err:not(:empty), .auth .msg.ok:not(:empty) { padding: .55rem .8rem; border-radius: 8px; border: 1px solid; }
+  .auth .msg.err:not(:empty) { border-color: color-mix(in srgb, var(--bad) 40%, var(--panel)); background: color-mix(in srgb, var(--bad) 8%, var(--panel)); }
+  .auth .msg.ok:not(:empty) { border-color: color-mix(in srgb, var(--ok) 40%, var(--panel)); background: color-mix(in srgb, var(--ok) 8%, var(--panel)); }
+  @media (max-width: 30rem) { .top { flex-wrap: wrap; row-gap: .4rem; } .brand, button.theme { white-space: nowrap; } button.theme { margin-left: auto; } .top .links { order: 1; flex-basis: 100%; margin-left: 0; font-size: .85rem; } .top .who, #planTag { display: none !important; } .auth { --pad: 1.25rem; margin: 1rem .75rem 2rem; border-radius: 12px; } .auth::before { border-radius: 12px 12px 0 0; } .auth .fine { border-radius: 0 0 12px 12px; } .auth h1 { font-size: 1.4rem; } }
   .step { display: grid; grid-template-columns: 2rem 1fr; gap: .2rem .8rem; padding: 1rem 0; border-top: 1px solid var(--line); }
   .step .n { font: 700 .85rem/1.6 var(--mono); color: var(--accent); }
   .step h3 { margin: 0 0 .3rem; font-size: 1rem; } .step p { margin: 0 0 .5rem; color: var(--ink2); font-size: .92rem; }
   .snip { position: relative; margin: .4rem 0 .6rem; } .snip pre { margin: 0; padding-right: 4.5rem; font-family: var(--mono); font-size: .84rem; }
   .snip button { position: absolute; top: .45rem; right: .45rem; padding: .2rem .6rem; font-size: .8rem; }
   .addr th { text-align: left; font-weight: 600; padding-right: 1rem; white-space: nowrap; } .addr td { word-break: break-all; }
-  .once { border: 1px solid var(--warn); background: color-mix(in srgb, var(--warn) 10%, var(--panel)); border-radius: 6px; padding: 1rem 1.1rem; margin: 1rem 0; }
-  .tok { font-family: var(--mono); word-break: break-all; padding: .6rem; background: var(--bg); border-radius: 4px; }
-  .msg { min-height: 1.4rem; margin: .6rem 0; color: var(--ink2); } .msg.err { color: var(--bad); } .msg.ok { color: var(--ok); }
+  .once { border: 1px solid var(--warn); background: color-mix(in srgb, var(--warn) 10%, var(--panel)); border-radius: 10px; padding: 1rem 1.1rem; margin: 1rem 0; }
+  .tok { font-family: var(--mono); word-break: break-all; padding: .6rem .75rem; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; }
+  .msg { min-height: 1.4rem; margin: .6rem 0; color: var(--ink2); } .panel > .msg:empty { display: none; } .msg.err { color: var(--bad); } .msg.ok { color: var(--ok); }
   .muted { color: var(--ink2); }
   [hidden] { display: none !important; }
-  @media (max-width: 48rem) { .layout { grid-template-columns: 1fr; } nav { display: flex; flex-wrap: wrap; padding: .3rem; border-right: 0; border-bottom: 1px solid var(--line); } nav .group { display: none; } nav a { border-left: 0; border-bottom: 3px solid transparent; } nav a.on { border-bottom-color: var(--accent); } }
+  @media (max-width: 48rem) { .layout { grid-template-columns: 1fr; } nav { display: flex; overflow-x: auto; padding: 0 .3rem; border-right: 0; border-bottom: 1px solid var(--line); } nav .group { display: none; } nav a { flex: none; white-space: nowrap; border-left: 0; border-bottom: 3px solid transparent; } main { padding: 1.25rem 1rem 2rem; } nav a.on { border-bottom-color: var(--accent); }
+    .cards { grid-template-columns: 1fr 1fr; gap: .6rem; } .card { padding: .75rem .85rem; } .card .k { font-size: .6rem; letter-spacing: .06em; } .card .v { font-size: 1.4rem; } .card .s { font-size: .8rem; line-height: 1.35; }
+    table:has(#urls), #urls, table:has(#audit), #audit { display: block; } table:has(#audit) thead { display: none; }
+    #urls tr { display: grid; gap: .15rem; padding: .55rem 0; border-bottom: 1px solid var(--line); } #urls tr:last-child { border-bottom: 0; }
+    #urls th, #urls td { padding: 0; border: 0; } #urls td { overflow-wrap: anywhere; font-size: .8rem; }
+    #audit tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .15rem .75rem; padding: .65rem 0; border-bottom: 1px solid var(--line); } #audit tr:last-child { border-bottom: 0; }
+    #audit td { min-width: 0; padding: 0; border: 0; white-space: normal; }
+    #audit td:nth-child(3) { grid-area: 1 / 1; font-weight: 600; } #audit td:nth-child(1) { grid-area: 1 / 2; color: var(--ink2); font-size: .8rem; white-space: nowrap; }
+    #audit td:nth-child(2), #audit td:nth-child(4), #audit td[colspan] { grid-column: 1 / -1; font-size: .8rem; } #audit td:nth-child(2) { color: var(--ink2); } }
 </style>
 <div class="top"><a class="brand" href="https://agent-custody.dev/"><svg viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="14"/><path d="M19 11H45V45L41.75 48 38.5 45 35.25 48 32 45 28.75 48 25.5 45 22.25 48 19 45Z" fill="#fff"/><path d="M25 20h14M25 27h14" stroke="var(--accent)" stroke-width="2.6" stroke-linecap="round"/><path d="M25 37.5l5 4.5 9.5-10" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/></svg>agent-custody</a><span id="tenantTag" class="pill" hidden></span><span id="planTag" class="pill" hidden></span><span class="links"><a href="https://agent-custody.dev/guide/getting-started">Guide</a><a href="https://docs.agent-custody.dev/reference/">Docs</a><a href="https://agent-custody.dev/verify">Verify a receipt</a></span><span class="who" id="who"></span><button class="theme" id="themeToggle" type="button">Dark mode</button></div>
 <div id="notice" class="notice" hidden></div>
-<section id="auth" class="auth" hidden>
+<section id="auth" class="auth split" hidden>
+  <aside class="pitch">
+    <p class="eyebrow">agent-custody hosted log</p>
+    <h2>Proof of what your AI agents did.</h2>
+    <p>Your gateway signs a receipt for each tool call that it checks. This log keeps the hash of each receipt in a Merkle tree with signed heads, so a changed or removed receipt shows.</p>
+    <ol class="flow">
+      <li><b>Your agent calls a tool</b><span>The gateway checks the call against your policy before it runs.</span></li>
+      <li><b>The gateway signs a receipt</b><span>The receipt stays on your machines.</span></li>
+      <li><b>Its hash comes to this log</b><span>Anyone with the public keys can verify the receipt and its place in the log.</span></li>
+    </ol>
+  </aside>
+  <div class="pane">
+  ${MARK}
+  <p class="eyebrow">Hosted log</p>
   <h1 id="authTitle">Sign in</h1>
   <div id="providers" class="providers" hidden></div>
   <form id="authForm">
     <label>Work email<input id="email" type="email" autocomplete="email" required></label>
     <label>Password<input id="password" type="password" autocomplete="current-password" minlength="10" required></label>
     <button id="authGo" type="submit">Sign in</button>
-    <p class="msg" id="authMsg"></p>
+    <p class="msg" id="authMsg" aria-live="polite"></p>
   </form>
   <form id="mfaForm" hidden>
     <p class="muted">Your account has two-step sign-in. Enter the six-digit code from your authenticator app.</p>
     <label>Code<input id="mfaCode" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required></label>
     <button type="submit">Verify</button>
-    <p class="msg" id="mfaMsg"></p>
+    <p class="msg" id="mfaMsg" aria-live="polite"></p>
   </form>
   <p class="muted" id="authNote" hidden>Next you name your organisation and get your tenant and its first key. Two minutes.</p>
   <form id="ssoForm" action="/auth/sso" method="get">
     <label>Work email for single sign-on<input name="email" type="email" autocomplete="email" required></label>
     <button class="quiet" type="submit">Sign in with single sign-on</button>
   </form>
-  <p class="muted"><button class="link" id="authSwap" type="button">Create an account instead</button></p>
-  <p class="muted">The free plan is ten thousand appends a month, no card. Your gateway sends only hashes; nothing you log here can be read by us.</p>
+  <p class="muted swap"><button class="link" id="authSwap" type="button">Create an account instead</button></p>
+  <p class="muted fine">The free plan is ten thousand appends a month, no card. Your gateway sends only hashes; nothing you log here can be read by us.</p>
+  </div>
 </section>
-<section id="onboard" class="auth" hidden>
+<section id="onboard" class="auth split" hidden>
+  <aside class="pitch">
+    <p class="eyebrow">Setup, step 1 of 4</p>
+    <h2>Your own log, in about two minutes.</h2>
+    <ol class="flow">
+      <li class="now"><b>Create your tenant</b><span>Name your organisation. The tenant id becomes the path of your log.</span></li>
+      <li><b>Copy your first API key</b><span>We show it once and keep only its hash.</span></li>
+      <li><b>Point your gateway at the log</b><span>One config entry and one environment variable.</span></li>
+      <li><b>Send your first receipt</b><span>The dashboard shows the append within seconds.</span></li>
+    </ol>
+  </aside>
+  <div class="pane">
+  ${MARK}
   <h1>Set up your tenant</h1>
   <p class="muted">Signed in as <b id="onboardWho"></b>. A tenant is your own log on this service, with its own keys and its own path.</p>
   <div id="invites" class="panel" hidden><p><b>You are invited to join a tenant.</b> Your email address must be verified first.</p><div id="inviteList"></div></div>
   <form id="onboardForm">
     <label>Your name<input id="name" autocomplete="name" maxlength="120" required></label>
     <label>Company or organisation<input id="company" autocomplete="organization" maxlength="160" required></label>
-    <label>Tenant id<input id="tenant" placeholder="acme" pattern="[a-z0-9][a-z0-9-]{1,38}[a-z0-9]" required><span class="hint">A short name for your organisation, filled in from the company name; change it if you like. It becomes the path of your log, which your gateway config and your auditors will use: <code id="tenantPreview">__LOG_BASE__t/&lt;tenant&gt;/</code></span></label>
+    <label>Tenant id<input id="tenant" placeholder="acme" pattern="[a-z0-9][a-z0-9\\-]{1,38}[a-z0-9]" required><span class="hint">A short name for your organisation, filled in from the company name; change it if you like. It becomes the path of your log, which your gateway config and your auditors will use: <code id="tenantPreview">__LOG_BASE__t/&lt;tenant&gt;/</code></span></label>
     <label>Your role <span class="opt">optional</span><input id="role" autocomplete="organization-title" maxlength="120" placeholder="Head of Platform"></label>
     <label>Phone <span class="opt">optional</span><input id="phone" type="tel" autocomplete="tel" maxlength="40" placeholder="+44 20 …"></label>
     <label>Telegram username <span class="opt">optional</span><input id="telegram" maxlength="40" placeholder="@yourname"><span class="hint">Your handle in Telegram, under Settings, if you would rather we reach you there than by email.</span></label>
     <button type="submit">Create tenant</button>
-    <p class="msg" id="onboardMsg"></p>
+    <p class="msg" id="onboardMsg" aria-live="polite"></p>
   </form>
   <p class="muted"><a href="#" id="signoutOnboard">Sign out</a></p>
+  </div>
 </section>
 <section id="welcome" class="auth wide" hidden>
+  <div class="side">
+  ${MARK}
   <h1>Your tenant is ready</h1>
   <p class="muted">Three steps to your first receipt in this log. Everything here is under <b>Setup</b> in the dashboard whenever you need it again.</p>
   <div class="once"><p><b>Your first API key, shown once.</b> Put it in the environment your gateway reads as <code>AGENT_CUSTODY_LOG_TOKEN</code>. We keep only its hash.</p><p class="tok" id="firstToken"></p><button class="quiet" id="copyFirst">Copy key</button></div>
-  <div id="firstSetup"></div>
   <p><button id="toDash">Go to the dashboard</button></p>
+  </div>
+  <div id="firstSetup"></div>
 </section>
 <div class="layout" id="app" hidden>
   <nav>
@@ -1416,13 +1524,14 @@ const PORTAL_PAGE = `<!doctype html>
   const note = (id, text, ok) => { $(id).className = "msg " + (ok ? "ok" : "err"); $(id).textContent = text; };
   const show = (id) => { for (const s of ["auth", "onboard", "welcome", "app"]) $(s).hidden = s !== id; };
   const PROVIDERS = __PROVIDERS__;
-  if (PROVIDERS.length) { $("providers").innerHTML = PROVIDERS.map((p) => "<a href='/auth/" + p + "'>Continue with " + (p === "github" ? "GitHub" : "Google") + "</a>").join("") + "<p class=or>or with email</p>"; $("providers").hidden = false; }
+  const ICONS = { github: "<svg viewBox='0 0 16 16' aria-hidden='true'><path fill='currentColor' d='M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z'/></svg>", google: "<svg viewBox='0 0 48 48' aria-hidden='true'><path fill='#EA4335' d='M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z'/><path fill='#4285F4' d='M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z'/><path fill='#FBBC05' d='M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z'/><path fill='#34A853' d='M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z'/></svg>" };
+  if (PROVIDERS.length) { $("providers").innerHTML = PROVIDERS.map((p) => "<a href='/auth/" + p + "'>" + ICONS[p] + "Continue with " + (p === "github" ? "GitHub" : "Google") + "</a>").join("") + "<p class=or>or with email</p>"; $("providers").hidden = false; }
   const view = (name) => {
     for (const p of document.querySelectorAll("[data-pane]")) p.hidden = p.dataset.pane !== name;
     for (const a of document.querySelectorAll("nav a[data-view]")) a.classList.toggle("on", a.dataset.view === name);
     location.hash = name;
   };
-  const LOG_BASE = "__LOG_BASE__";
+  const LOG_BASE = $("tenantPreview").textContent.replace("t/<tenant>/", "");
   const slug = (s) => s.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
   let tenantEdited = false;
   const previewTenant = () => { $("tenantPreview").textContent = LOG_BASE + "t/" + ($("tenant").value || "<tenant>") + "/"; };
@@ -1461,7 +1570,7 @@ const PORTAL_PAGE = `<!doctype html>
   const step = (n, title, body) => "<div class=step><span class=n>" + n + "</span><div><h3>" + title + "</h3>" + body + "</div></div>";
   const renderSetup = (el, s, atRegistration) => {
     el.innerHTML =
-      step(1, "Keep the key where your gateway runs", (atRegistration ? "<p>The key above is shown once; we keep only its hash. Put it in the environment of the machine that runs your gateway or SDK:</p>" : "<p>Your key was shown once at registration. If it is gone, mint another under <a href=\\"#keys\\" data-view=\\"keys\\">API keys</a>. It lives in the environment of the machine that runs your gateway or SDK:</p>") + snip(s.env)) +
+      step(1, "Keep the key where your gateway runs", (atRegistration ? "<p>Your first key is shown once; we keep only its hash. Put it in the environment of the machine that runs your gateway or SDK:</p>" : "<p>Your key was shown once at registration. If it is gone, mint another under <a href=\\"#keys\\" data-view=\\"keys\\">API keys</a>. It lives in the environment of the machine that runs your gateway or SDK:</p>") + snip(s.env)) +
       step(2, "Point your gateway or SDK at your log", "<p>Add this to <code>gateway.json</code> or <code>sdk.json</code>. <code>hashOnly</code> means this log receives the hash of each receipt and never the receipt.</p>" + snip(s.config)) +
       step(3, "Send the first receipt", "<p>Run your agent through the gateway once. The <a href=\\"#overview\\" data-view=\\"overview\\">Overview</a> shows the append within seconds, and the first signed checkpoint follows within minutes. New to the gateway? <a href=\\"https://agent-custody.dev/guide/getting-started\\">Getting started</a> takes ten minutes.</p>") +
       step(4, "Hand this to whoever verifies your receipts", "<p>Both commands fetch this log's published keys and pin them; <code>--log-id</code> makes sure the tree heads are this log's.</p>" + snip(s.verify) + snip(s.audit)) +
