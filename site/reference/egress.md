@@ -1,6 +1,6 @@
 # The egress witness
 
-An HTTP forward proxy for a locked-down agent's connections that do not go to the [gateway](./gateway). It relays CONNECT and plain HTTP, with no TLS interception. Each connection is tied to an agent by the proxy credential the witness checked, decided by a Cedar policy per destination, and receipted either way with `issuer.kind: "egress"`. The guide is [the egress witness](/receipts/egress), and [credential custody and lockdown](/guide/credential-custody) covers the deployment; this page is the exact contract.
+An HTTP forward proxy for a locked-down agent's connections that do not go to the [gateway](./gateway). It relays CONNECT and plain HTTP, with no TLS interception. Each connection is tied to an agent by the proxy credential the witness checked, decided by a Cedar or Rego policy per destination, and receipted either way with `issuer.kind: "egress"`. The guide is [the egress witness](/receipts/egress), and [credential custody and lockdown](/guide/credential-custody) covers the deployment; this page is the exact contract.
 
 It sees the destination, the times, and the byte counts. It never sees payloads. It sees nothing that skips it, which happens whenever lockdown is off, and it relays no protocol other than HTTP. Each receipt is an observed bypass, not a record of what was done.
 
@@ -12,7 +12,7 @@ It sees the destination, the times, and the byte counts. It never sees payloads.
 | --- | --- | --- | --- |
 | `identity.keyFile` | path | required | the witness's signing key |
 | `agents` | `{ id, secretEnv }[]` | required, at least one | each agent and the environment variable holding its proxy secret; ids are unique, with no colon or whitespace |
-| `policyFile` | path | required | Cedar; re-read when it changes, and a file that does not parse leaves the policy in force |
+| `policyFile` | path | required | Cedar, or Rego when the name ends in `.rego` (compiled by `opa build`, which must be on `PATH` when it loads); re-read when it changes, and a file that does not parse or compile leaves the policy in force |
 | `mode` | `enforce` \| `observe` | `enforce` | `observe` relays every connection from a verified agent and records `enforced: false`; it also relays when the log refuses the commit, and that receipt fails `egress open committed before relaying` |
 | `connectTimeoutMs` | integer | 10000 | wait for the destination to accept |
 | `idleTimeoutMs` | integer | 300000 | close a relayed connection idle this long |
@@ -54,6 +54,39 @@ Also exported: `checkProxyCredential(header, agents)`, `parseAuthority(authority
 - **Context:** `args: { method, host, port }`, and `facts.destination: { host, port, scheme, credential, declared?, remote }`.
 
 Without a verified credential, the connection is refused with 407 in every mode.
+
+## The Rego input
+
+For a `.rego` policy file, the same request with plain strings, under `package agentcustody` with `allow` (a boolean) and `deny` (a set of strings), as in the gateway's [Rego contract](/receipts/policies#rego):
+
+| Rego | value |
+| --- | --- |
+| `input.principal` | the agent id if the credential verified, otherwise `"unknown"` |
+| `input.action`, `input.resource` | `"host:port"` |
+| `input.context.args` | `{ method, host, port }`. **Provenance: claimed.** |
+| `input.context.facts.destination` | `{ host, port, scheme, credential, declared?, remote }`. **Provenance: observed.** |
+
+`deploy/gateway/lockdown/config/egress-policy.cedar` in Rego:
+
+```rego
+package agentcustody
+
+# The research agent may read the package registry and the public docs over TLS.
+allow if {
+	input.principal == "research-agent"
+	input.action in {"registry.npmjs.org:443", "docs.python.org:443"}
+}
+
+# Any known agent may reach hosts under example.com on 443; context.facts.destination is the witness's own observation.
+allow if {
+	d := input.context.facts.destination
+	d.credential == "verified"
+	d.port == 443
+	endswith(d.host, ".example.com")
+}
+```
+
+The receipt's `policyDigest` is the sha256 of the file's text, as for Cedar. An OPA server (`opa: { url }`) is not supported: the witness decides each connection synchronously before it relays, and a query to a server would put a network round trip outside the witness in front of every connection.
 
 ## Responses
 
@@ -97,3 +130,4 @@ A host name is never dialled at an internal address: the resolver drops loopback
 - The byte counts of a connection open when the witness is killed: the committed authorization is in the log, the closing receipt is not.
 - Agent identity by source address or by signed grant.
 - `agent-custody check` for an egress config.
+- A decision from an OPA server. A `.rego` file works.

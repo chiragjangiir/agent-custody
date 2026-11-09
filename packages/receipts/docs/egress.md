@@ -3,7 +3,7 @@
 The gateway holds an agent's tool credentials and receipts every call made through it. An agent that has a credential of its own, or that calls a public API with none, can go around it. The egress witness is for those connections. It is an HTTP forward proxy in the agent's network path, the [door](door.md) turned around to face outbound traffic. For each connection that does not go to the gateway, it:
 
 - identifies the agent by a proxy credential it checks;
-- lets a Cedar policy decide per destination (host and port);
+- lets a Cedar or Rego policy decide per destination (host and port);
 - relays the connection or refuses it;
 - signs a receipt either way, with `issuer.kind: "egress"`. The receipt goes to the log like any other.
 
@@ -35,6 +35,7 @@ Each receipt is an **observed bypass**: evidence that the agent connected to a d
 }
 ```
 
+- `policyFile`: a Cedar file, or a Rego file when the name ends in `.rego` (see [the same policy in Rego](#the-same-policy-in-rego)). The witness re-reads it when it changes. A file that does not parse or compile is not loaded, and the policy in force stays.
 - `agents`: each agent the witness knows, and the environment variable that holds its proxy secret. The secret is never in the file. An agent id has no colon or whitespace, because Basic credentials split at the first colon. The witness refuses to start if a variable is unset.
 - `mode`: `enforce` (the default) refuses what the policy denies. `observe` relays every connection from a known agent and records the decision with `enforced: false`, so you can see what your agents call before you block anything. A connection without a valid credential is refused in both modes.
 - `connectTimeoutMs`: how long the witness waits for the destination to accept the connection. `idleTimeoutMs`: a relayed connection with no bytes in either direction for this long is closed.
@@ -71,6 +72,34 @@ permit(principal == Agent::"research-agent", action == Action::"registry.npmjs.o
 permit(principal, action, resource)
 when { context.facts.destination.credential == "verified" && context.facts.destination.port == 443 && context.facts.destination.host like "*.example.com" };
 ```
+
+### The same policy in Rego
+
+Give `policyFile` a name ending in `.rego`, and the witness compiles it with `opa build`, exactly as the gateway does ([Rego](policies.md#rego)). The policy declares `package agentcustody`, with an `allow` boolean and a `deny` set of strings. The input is the Cedar request above with plain strings: `input.principal` is the agent id, or `"unknown"` when the credential did not verify, `input.action` and `input.resource` are `host:port`, and `input.context` holds `args` and `facts.destination`. The `opa` binary must be on `PATH` when the policy loads or changes. The witness notices a change on the first connection after it and compiles the file then, so that connection waits for `opa build`, typically a few hundred milliseconds. A file that does not compile is compiled once, not again on each connection, until it changes. The gateway image includes `opa`.
+
+This is `deploy/gateway/lockdown/config/egress-policy.cedar` in Rego:
+
+```rego
+package agentcustody
+
+# The research agent may read the package registry and the public docs over TLS.
+allow if {
+	input.principal == "research-agent"
+	input.action in {"registry.npmjs.org:443", "docs.python.org:443"}
+}
+
+# Any known agent may reach hosts under example.com on 443; context.facts.destination is the witness's own observation.
+allow if {
+	d := input.context.facts.destination
+	d.credential == "verified"
+	d.port == 443
+	endswith(d.host, ".example.com")
+}
+```
+
+`endswith(d.host, ".example.com")` is Cedar's `like "*.example.com"`. A `deny` entry wins over `allow`, as a `forbid` wins over a `permit`, and its strings are the reason in the 403 and in the receipt. The receipt's `policyDigest` is the sha256 of the file's text, as for Cedar.
+
+An OPA server (`opa: { url }`) is not supported here yet. The gateway can ask one, but the witness decides each connection synchronously, before it relays a byte. An HTTP query per connection would need that decision to wait, and fail closed, on a server outside the witness. Use a `.rego` file.
 
 [Writing egress policies](../../../site/guide/egress-policies.md) is the guide to these rules: allow lists, wildcard hosts, ports, IP literals, `forbid`, and rolling out from observe mode. Every example in it is tested.
 
@@ -143,5 +172,6 @@ Vectors `egress-*` and `resigned-egress-*` in `vectors/receipts.json` cover them
 - Record the byte counts of a connection open when the witness is killed: the committed authorization is in the log, the closing receipt is not.
 - Identify an agent by its source address or by a signed grant. Today only per-agent proxy credentials identify an agent.
 - `agent-custody check` does not read an egress config yet.
+- Ask an OPA server for the decision. A `.rego` file works; `opa: { url }` does not, because the decision is made synchronously before the relay.
 
-Tutorial: [41-egress.ts](../examples/41-egress.ts).
+Tutorials: [41-egress.ts](../examples/41-egress.ts), and [44-egress-rego.ts](../examples/44-egress-rego.ts) for a Rego policy.

@@ -8,21 +8,26 @@
 // a log that refuses means nothing is relayed. A permit for a host name never becomes a request to an internal address,
 // because a name the agent chose, or a DNS answer someone else chose, would otherwise reach the metadata service. A
 // connection still committing or connecting when the witness stops cannot outlive close().
-// Every receipt verifies with public keys alone.
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+// Every receipt verifies with public keys alone. A Rego policy file decides on the same request as Cedar, an unverified
+// agent is not its principal either, and a reload that does not compile leaves the policy in force: a broken edit must
+// never open, or silently close, the agent's network.
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdtempSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { createServer, request, type Server } from "node:http";
 import { createServer as createTcpServer, type AddressInfo, type LookupFunction } from "node:net";
 import { internalAddress, isAddressLiteral, sameAddress } from "../src/addresses.ts";
 import type { LogSink } from "../src/log-sink.ts";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { loadEgressConfig } from "../src/config.ts";
 import { loadPublicKey, sha256Hex } from "../src/crypto.ts";
 import { RECEIPT_HEADER } from "../src/door.ts";
 import { DESTINATION_FACT, checkProxyCredential, createEgressHost, type EgressOptions, destinationName, normalizeHost, parseAuthority, serveEgress, type Destination, type EgressResult } from "../src/egress.ts";
 import type { ReceiptBundle, ReceiptStatement } from "../src/receipt.ts";
 import { verifyBundle } from "../src/verify.ts";
+import { evaluate, policyDigest } from "../src/policy.ts";
+import { compileRego, evaluateRego } from "../src/policy-rego.ts";
 import { EGRESS_AGENT, EGRESS_SECRET, buildEgressFixture, connectThrough, proxyAuth, startEcho, type EchoServer, type EgressFixture } from "../scripts/egress-fixture.ts";
 
 const decode = (b: ReceiptBundle) => JSON.parse(Buffer.from(b.envelope.payload, "base64").toString()) as ReceiptStatement;
@@ -320,5 +325,128 @@ describe("the witness's limits and modes", () => {
     const fx = buildEgressFixture(mkdtempSync(join(tmpdir(), "egress-")), { agents: [{ id: "other", secretEnv: "EGRESS_TEST_UNSET_VARIABLE" }] });
     delete process.env.EGRESS_TEST_UNSET_VARIABLE;
     await expect(createEgressHost(loadEgressConfig(fx.configFile))).rejects.toThrow(/EGRESS_TEST_UNSET_VARIABLE is not set/);
+  });
+});
+
+// A .rego policy is compiled by the opa binary. Without it on PATH these are skipped on a developer's machine; CI installs
+// opa, so there a missing binary fails instead of passing quietly.
+const opaOnPath = spawnSync("opa", ["version"]).status === 0;
+
+describe.skipIf(!opaOnPath && !process.env.CI)("the witness, deciding by a Rego policy", () => {
+  const REGO = `package agentcustody
+
+allow if {
+	input.principal == "${EGRESS_AGENT}"
+	input.context.facts.destination.host == "127.0.0.1"
+}
+
+deny contains "payments go through the gateway" if endswith(input.action, ".stripe.com:443")
+`;
+  const startRego = (policy = REGO, extra: Record<string, unknown> = {}) => start({ policyFile: "policy.rego", ...extra }, policy);
+
+  it("relays what the Rego policy allows and refuses what it denies, with the reason, the digest, and a receipt that verifies", async () => {
+    const echo = await startEcho();
+    const w = await startRego();
+    try {
+      expect(w.host.policyDigest()).toBe(policyDigest(REGO));
+      const a = await connectThrough(w.port, `127.0.0.1:${echo.port}`, good);
+      expect(a.status).toBe(200);
+      a.socket.end();
+      const allowed = await waitForReceipt(w.fx, a.headers[RECEIPT_HEADER]!);
+      expect(decode(allowed).predicate.policy).toMatchObject({ decision: "allow", reasons: ["data.agentcustody.allow"], errors: [], policyDigest: policyDigest(REGO), provenance: "observed" });
+      expect(failing(verified(w.fx, allowed))).toEqual([]);
+
+      const r = await connectThrough(w.port, "api.stripe.com:443", good);
+      expect(r.status).toBe(403);
+      expect(JSON.parse(r.body).reason).toBe("payments go through the gateway");
+      r.socket.destroy();
+      const refused = await waitForReceipt(w.fx, r.headers[RECEIPT_HEADER]!);
+      const p = decode(refused).predicate;
+      expect(p.policy).toMatchObject({ decision: "deny", reasons: ["payments go through the gateway"], policyDigest: policyDigest(REGO) });
+      expect(p.execution.status).toBe("denied");
+      expect(failing(verified(w.fx, refused))).toEqual([]);
+      // nothing allows a host the policy does not name: default deny
+      const other = await connectThrough(w.port, "8.8.8.8:443", good);
+      expect(other.status).toBe(403);
+      other.socket.destroy();
+      // the deny rule names stripe.com's hosts, not a lookalike that only ends in the same letters
+      const lookalike = await connectThrough(w.port, "evilstripe.com:443", good);
+      expect(lookalike.status).toBe(403);
+      expect(JSON.parse(lookalike.body).reason).toBe("no permit policy matched");
+      lookalike.socket.destroy();
+    } finally { await w.stop(); await echo.close(); }
+  });
+
+  it("an agent whose secret did not verify is not the Rego principal, even in observe mode", async () => {
+    const echo = await startEcho();
+    const w = await startRego(REGO, { mode: "observe" });
+    try {
+      const a = await connectThrough(w.port, `127.0.0.1:${echo.port}`, proxyAuth(EGRESS_AGENT, "guess"));
+      expect(a.status).toBe(407);
+      a.socket.destroy();
+      const p = decode(await waitForReceipt(w.fx, a.headers[RECEIPT_HEADER]!)).predicate;
+      expect(p.agent).toEqual({ id: "unknown", provenance: "claimed" });
+      // the policy saw "unknown", so the allow on the named agent did not hold
+      expect(p.policy!.decision).toBe("deny");
+      expect(p.facts[DESTINATION_FACT]!.value).toMatchObject({ credential: "invalid", declared: EGRESS_AGENT });
+    } finally { await w.stop(); await echo.close(); }
+  });
+
+  it("a Rego file that does not compile is not loaded: at start the witness refuses to run, on reload the policy in force stays", async () => {
+    const broken = "package agentcustody\nallow if {\n";
+    await expect(startRego(broken)).rejects.toThrow(/policy .*policy\.rego does not compile: .*rego_parse_error/);
+
+    const echo = await startEcho();
+    const w = await startRego();
+    const file = join(w.fx.dir, "policy.rego");
+    const replace = (text: string) => { writeFileSync(`${file}.new`, text); renameSync(`${file}.new`, file); };
+    try {
+      replace(broken);
+      // the broken file is compiled once, not again on each connection: opa build blocks every tunnel while it runs
+      const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
+      try {
+        for (let i = 0; i < 3; i++) {
+          const a = await connectThrough(w.port, `127.0.0.1:${echo.port}`, good);
+          expect(a.status).toBe(200);
+          a.socket.end();
+          expect(decode(await waitForReceipt(w.fx, a.headers[RECEIPT_HEADER]!)).predicate.policy!.policyDigest).toBe(policyDigest(REGO));
+        }
+        expect(errors.mock.calls.filter(([m]) => String(m).includes("POLICY NOT RELOADED"))).toHaveLength(1);
+      } finally { errors.mockRestore(); }
+      expect(w.host.policyDigest()).toBe(policyDigest(REGO));
+
+      // a valid file replaces it from the next connection
+      const closed = "package agentcustody\n\nallow := false\n";
+      replace(closed);
+      const b = await connectThrough(w.port, `127.0.0.1:${echo.port}`, good);
+      expect(b.status).toBe(403);
+      b.socket.destroy();
+      expect(decode(await waitForReceipt(w.fx, b.headers[RECEIPT_HEADER]!)).predicate.policy!.policyDigest).toBe(policyDigest(closed));
+    } finally { await w.stop(); await echo.close(); }
+  });
+
+  it("the Rego policy in the docs decides as the lockdown Cedar policy it translates", () => {
+    const cedar = readFileSync(join(import.meta.dirname, "..", "..", "..", "deploy", "gateway", "lockdown", "config", "egress-policy.cedar"), "utf8");
+    const blocks = [join(import.meta.dirname, "..", "docs", "egress.md"), join(import.meta.dirname, "..", "..", "..", "site", "reference", "egress.md")]
+      .map((f) => [...readFileSync(f, "utf8").matchAll(/```rego\n([\s\S]*?)```/g)].map((m) => m[1]!));
+    expect(blocks.map((b) => b.length)).toEqual([1, 1]);
+    expect(blocks[1]![0]).toBe(blocks[0]![0]);
+    const { policy, errors } = compileRego(blocks[0]![0]!);
+    expect(errors).toEqual([]);
+    const req = (agent: string, host: string, port: number, credential = "verified") => ({
+      agentId: agent, tool: destinationName(host, port),
+      context: { args: { method: "CONNECT", host, port }, facts: { [DESTINATION_FACT]: { host, port, scheme: "connect", credential, remote: "10.0.0.5" } } },
+    });
+    const cases = [
+      req(EGRESS_AGENT, "registry.npmjs.org", 443), req(EGRESS_AGENT, "docs.python.org", 443), req(EGRESS_AGENT, "registry.npmjs.org", 80),
+      req("other-agent", "registry.npmjs.org", 443), req("unknown", "docs.python.org", 443, "invalid"),
+      req("other-agent", "api.example.com", 443), req("other-agent", "a.b.example.com", 443), req("other-agent", "example.com", 443),
+      req("other-agent", "api.example.com", 80), req("unknown", "api.example.com", 443, "absent"), req("other-agent", "example.com.evil.test", 443),
+      req(EGRESS_AGENT, "api.stripe.com", 443),
+    ];
+    const decisions = cases.map((c) => [c.tool, c.agentId, evaluate(cedar, c).decision, evaluateRego(policy!, "d", c).decision]);
+    for (const [tool, agent, fromCedar, fromRego] of decisions) expect(fromRego, `${agent} ${tool}`).toBe(fromCedar);
+    // both kinds of answer are exercised
+    expect(new Set(decisions.map((d) => d[2]))).toEqual(new Set(["allow", "deny"]));
   });
 });

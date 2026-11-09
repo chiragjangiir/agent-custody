@@ -34,7 +34,8 @@ export function buildEgressFixture(dir: string, extra: Record<string, unknown> =
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(dir, { recursive: true });
   const witness = writeKeyPair(generateKeyPair(), join(dir, "keys"), "egress");
-  writeFileSync(join(dir, "policy.cedar"), policy);
+  // a policyFile in extra names the file the policy is written to, so a .rego name holds a Rego policy
+  writeFileSync(join(dir, typeof extra.policyFile === "string" ? extra.policyFile : "policy.cedar"), policy);
   process.env[EGRESS_SECRET_ENV] = EGRESS_SECRET;
   const config = {
     identity: { keyFile: "keys/egress.key" },

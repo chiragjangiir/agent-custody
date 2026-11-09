@@ -1,7 +1,7 @@
 // The egress witness: an HTTP forward proxy in the agent's network path, the door turned around to face outbound
 // traffic. An agent whose environment is locked down (default-deny egress except the gateway and this witness) reaches
 // anything else only through here. Each connection is tied to an agent by the proxy credential the witness checked,
-// decided by the Cedar policy for its destination, relayed or refused, and receipted either way with issuer kind
+// decided by the Cedar or Rego policy for its destination, relayed or refused, and receipted either way with issuer kind
 // `egress`. CONNECT is relayed as an opaque tunnel: the witness sees the destination, the times, and the byte counts,
 // never the request, the response, or anything inside TLS. A receipt is an observed bypass of the gateway, not a record
 // of what was done.
@@ -19,6 +19,7 @@ import { createIssuer, ReceiptPending, type FlushResult } from "./issue.ts";
 import { openLog, type LogSink } from "./log-sink.ts";
 import { openExporter, type ReceiptExporter } from "./otel.ts";
 import { evaluate, hasPermitRule, policyDigest, policyParseErrors, type PolicyDecision } from "./policy.ts";
+import { compileRego, evaluateRego, isRegoFile, type RegoPolicy } from "./policy-rego.ts";
 import type { AuthorizationBundle, FactRecord, ReceiptPredicate } from "./receipt.ts";
 
 export const EGRESS_VERSION = "0.1.0";
@@ -206,7 +207,8 @@ export async function createEgressHost(cfg: EgressConfig, options: EgressOptions
   const issuer = createIssuer(key, cfg.receiptsDir, sink, { exporter: options.exporter ?? openExporter(cfg) });
 
   // The policy, re-read when the file changes, as the gateway and the door do; a file that does not parse is refused and
-  // the policy in force stays. The bytes and the metadata come from one open file.
+  // the policy in force stays. The bytes and the metadata come from one open file. A .rego file is compiled with the opa
+  // binary, as the gateway compiles one; a file that does not compile is refused the same way.
   const readPolicy = () => {
     const fd = openSync(cfg.policyFile, "r");
     try {
@@ -216,18 +218,32 @@ export async function createEgressHost(cfg: EgressConfig, options: EgressOptions
       closeSync(fd);
     }
   };
-  const first = readPolicy();
-  const errors = policyParseErrors(first.text);
-  if (errors.length) throw new Error(`policy ${cfg.policyFile} does not parse: ${errors.join("; ")}`);
-  if (!hasPermitRule(first.text)) console.error(`agent-custody egress: ${cfg.policyFile} has no permit rule, so every connection is refused`);
-  let policyNow = { text: first.text, digest: policyDigest(first.text), key: first.key };
+  const rego = isRegoFile(cfg.policyFile);
+  type Policy = { text: string; digest: string; key: string; rego?: RegoPolicy };
+  const loadPolicy = ({ text, key }: { text: string; key: string }): { policy: Policy; errors: [] } | { policy?: undefined; errors: string[] } => {
+    const digest = policyDigest(text);
+    if (!rego) {
+      const errors = policyParseErrors(text);
+      return errors.length ? { errors } : { policy: { text, digest, key }, errors: [] };
+    }
+    const compiled = compileRego(text);
+    return compiled.policy ? { policy: { text, digest, key, rego: compiled.policy }, errors: [] } : { errors: compiled.errors };
+  };
+  const first = loadPolicy(readPolicy());
+  if (!first.policy) throw new Error(`policy ${cfg.policyFile} does not ${rego ? "compile" : "parse"}: ${first.errors.join("; ")}`);
+  if (!rego && !hasPermitRule(first.policy.text)) console.error(`agent-custody egress: ${cfg.policyFile} has no permit rule, so every connection is refused`);
+  let policyNow: Policy = first.policy;
+  // A file that failed to load is not tried again until it changes: a Rego compile runs opa build on the event loop, so
+  // retrying it on every connection would stall every tunnel until the file is fixed.
+  let failedKey = "";
   const currentPolicy = () => {
     try {
       const next = readPolicy();
-      if (next.key !== policyNow.key) {
-        const problems = policyParseErrors(next.text);
-        if (problems.length) console.error(`agent-custody egress: POLICY NOT RELOADED: ${cfg.policyFile} ${problems.join("; ")}; policy ${policyNow.digest} stays in force`);
-        else policyNow = { text: next.text, digest: policyDigest(next.text), key: next.key };
+      if (next.key !== policyNow.key && next.key !== failedKey) {
+        const loaded = loadPolicy(next);
+        failedKey = loaded.policy ? "" : next.key;
+        if (!loaded.policy) console.error(`agent-custody egress: POLICY NOT RELOADED: ${cfg.policyFile} ${loaded.errors.join("; ")}; policy ${policyNow.digest} stays in force`);
+        else policyNow = loaded.policy;
       }
     } catch (e) {
       console.error(`agent-custody egress: cannot read ${cfg.policyFile}: ${e instanceof Error ? e.message : String(e)}; policy ${policyNow.digest} stays in force`);
@@ -249,12 +265,14 @@ export async function createEgressHost(cfg: EgressConfig, options: EgressOptions
     const name = destinationName(host, port);
     const method = (req.method ?? "GET").toUpperCase();
     const args = { method, host, port };
-    const { text, digest } = currentPolicy();
-    // The Cedar principal is an agent whose credential the witness checked; an id in a credential that failed stays in
-    // the destination fact as a claim, so a permit on `principal == Agent::"x"` cannot be met by naming x.
+    const { text, digest, rego: regoPolicy } = currentPolicy();
+    // The principal is an agent whose credential the witness checked; an id in a credential that failed stays in the
+    // destination fact as a claim, so a rule on `Agent::"x"` (Cedar) or `input.principal == "x"` (Rego) cannot be met by
+    // naming x.
     let policy: PolicyDecision;
     try {
-      policy = evaluate(text, { agentId: checked.agent ?? "unknown", tool: name, context: { args, facts: { [DESTINATION_FACT]: destination } } });
+      const request = { agentId: checked.agent ?? "unknown", tool: name, context: { args, facts: { [DESTINATION_FACT]: destination } } };
+      policy = regoPolicy ? evaluateRego(regoPolicy, digest, request) : evaluate(text, request);
     } catch (e) {
       policy = { decision: "deny", reasons: [], errors: [String(e instanceof Error ? e.message : e)], policyDigest: digest };
     }
