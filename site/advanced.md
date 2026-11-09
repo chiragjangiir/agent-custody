@@ -38,20 +38,20 @@ The gateway is a separate process between the agent and its tools. It checks a g
 
 ## Product overview film
 
-A 93-second narrated film with captions.
+A 30-second narrated film with captions. Priya, an AML lead, tells the story. The AML alert and the policy in the film are illustrative.
 
-<video controls playsinline preload="none" poster="/promo-poster.jpg" width="1920" height="1080" style="width: 100%; height: auto; aspect-ratio: 16 / 9; border-radius: 12px;" aria-label="A 93-second narrated film: the problem, the gateway, and a refund agent caught by a prompt injection, then the audit.">
+<video controls playsinline preload="none" poster="/promo-poster.jpg" width="1080" height="1080" style="display: block; width: 100%; max-width: 640px; height: auto; aspect-ratio: 1 / 1; margin: 0 auto; border-radius: 12px;" aria-label="A 30-second narrated film: an AI agent clears an AML alert and its own log can be edited. Replayed through agent-custody, the same call is denied, the refusal is signed, and an auditor verifies it offline.">
   <source src="/promo.mp4" type="video/mp4" />
   <track kind="captions" src="/promo.vtt" srclang="en" label="English" />
 </video>
 
 | time | chapter | what it shows |
 | --- | --- | --- |
-| 0:00 | The problem | The record of an agent's action is its own log. |
-| 0:14 | The gateway | Between your agents and their tools, a signed receipt for every call. |
-| 0:24 | How it works | A signed grant, a policy check before the tool runs, a Merkle log. |
-| 0:40 | The refund story | £500 approved. Then a prompt injection asks for £5,000. |
-| 1:12 | The audit | Months later, an auditor checks it with public keys and a copy of the log. |
+| 0:00 | Tuesday | An AI agent clears an AML alert. The auditor asks why. |
+| 0:06 | The log | The only record is the agent's own log, and anyone can edit it. |
+| 0:12 | Tuesday, replayed | The policy checks the same call before it runs. The call is denied, and the refusal is signed and logged. |
+| 0:19 | The audit | The auditor verifies the receipt offline, with public keys. A changed word makes the check fail. |
+| 0:25 | The close | "Now I don't explain what our agents did. I prove it." |
 
 ## The problem
 

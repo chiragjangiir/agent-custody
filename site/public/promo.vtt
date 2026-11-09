@@ -1,141 +1,49 @@
 WEBVTT
 
 1
-00:00:00.800 --> 00:00:03.702
-AI agents now issue refunds, run commands,
+00:00:00.000 --> 00:00:03.670
+<v Priya>Tuesday. Our AI agent cleared an AML alert.
 
 2
-00:00:03.702 --> 00:00:05.223
-and change production.
+00:00:03.800 --> 00:00:06.290
+<v Auditor>Why was this cleared? Who allowed it?
 
 3
-00:00:05.223 --> 00:00:06.812
-When one gets it wrong,
+00:00:06.450 --> 00:00:08.870
+<v Priya>All I had was the agent's own log.
 
 4
-00:00:06.812 --> 00:00:08.955
-the only record is its own log,
+00:00:09.150 --> 00:00:10.600
+<v Priya>Anyone could have edited it.
 
 5
-00:00:08.955 --> 00:00:12.910
-written by the same process that made the mistake.
+00:00:12.450 --> 00:00:15.080
+<v Priya>So we put agent-custody in front of it.
 
 6
-00:00:14.510 --> 00:00:18.703
-agent-custody puts a gateway between your agents and their tools,
+00:00:15.150 --> 00:00:17.100
+<v Priya>Same alert. Checked first.
 
 7
-00:00:18.703 --> 00:00:23.137
-and gives every call a signed receipt that anyone can verify.
+00:00:17.200 --> 00:00:17.900
+<v Priya>Denied.
 
 8
-00:00:24.740 --> 00:00:26.188
-A person signs a grant.
+00:00:17.950 --> 00:00:19.730
+<v Priya>And the refusal is signed.
 
 9
-00:00:26.188 --> 00:00:29.589
-The gateway checks every call against it and a policy,
+00:00:19.850 --> 00:00:22.620
+<v Auditor>It verifies. Public key only.
 
 10
-00:00:29.589 --> 00:00:30.912
-before the tool runs.
+00:00:22.750 --> 00:00:25.120
+<v Priya>Change one word, and it fails.
 
 11
-00:00:30.912 --> 00:00:33.305
-Allowed or denied, it signs a receipt,
+00:00:25.400 --> 00:00:27.890
+<v Priya>Now I don't explain what our agents did.
 
 12
-00:00:33.305 --> 00:00:39.157
-and the receipt's hash goes into a Merkle log that anyone can check with public keys.
-
-13
-00:00:40.960 --> 00:00:42.258
-Here it is at work.
-
-14
-00:00:42.258 --> 00:00:43.488
-Maya runs support.
-
-15
-00:00:43.488 --> 00:00:45.880
-She signs a grant for her AI agent:
-
-16
-00:00:45.880 --> 00:00:48.067
-refunds up to a thousand pounds,
-
-17
-00:00:48.067 --> 00:00:50.480
-only for verified customers.
-
-18
-00:00:52.080 --> 00:00:53.581
-Alex asks for a refund.
-
-19
-00:00:53.581 --> 00:00:55.474
-The gateway checks the grant,
-
-20
-00:00:55.474 --> 00:00:57.367
-looks the customer up itself,
-
-21
-00:00:57.367 --> 00:00:58.868
-and applies the policy.
-
-22
-00:00:58.868 --> 00:01:00.174
-Five hundred pounds?
-
-23
-00:01:00.174 --> 00:01:01.261
-Approved.
-
-24
-00:01:02.860 --> 00:01:05.361
-Then someone slips a line into a ticket,
-
-25
-00:01:05.361 --> 00:01:07.486
-and the agent tries five thousand.
-
-26
-00:01:07.486 --> 00:01:08.799
-The agent was fooled.
-
-27
-00:01:08.799 --> 00:01:10.487
-The gateway wasn't.
-
-28
-00:01:12.290 --> 00:01:14.226
-Every call gets a signed receipt,
-
-29
-00:01:14.226 --> 00:01:17.074
-and every field says who vouches for it.
-
-30
-00:01:18.670 --> 00:01:19.539
-Months later,
-
-31
-00:01:19.539 --> 00:01:23.550
-an auditor checks it with public keys and a copy of the log.
-
-32
-00:01:23.550 --> 00:01:24.152
-No login.
-
-33
-00:01:24.152 --> 00:01:26.123
-No trust in the agent.
-
-34
-00:01:27.720 --> 00:01:28.613
-agent-custody.
-
-35
-00:01:28.613 --> 00:01:31.218
-Proof of what your AI agents did.
+00:00:28.300 --> 00:00:29.160
+<v Priya>I prove it.

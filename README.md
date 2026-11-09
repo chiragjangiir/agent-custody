@@ -6,9 +6,9 @@
 
 Give your agents real power, without losing control of them. Your policy checks your agent's actions before they run. What it forbids does not run. Each action that it checks leaves a signed receipt that anyone can verify.
 
-[![A refund agent is fooled by a prompt injection and tries a £5,000 refund. The gateway denies it before it reaches Stripe, signs a receipt, and an auditor verifies the receipt with public keys.](site/public/promo.gif)](https://agent-custody.dev/advanced#product-overview-film)
+[![An AI agent clears an AML alert, and its own log can be edited. Replayed through agent-custody, the same call is denied before it runs, the refusal is signed, and an auditor verifies the receipt with public keys.](site/public/promo.gif)](https://agent-custody.dev/advanced#product-overview-film)
 
-*An agent was fooled. The gateway was not, and an auditor can prove it. [Watch the full 93-second film with sound](https://agent-custody.dev/advanced#product-overview-film).*
+*An agent cleared an alert, and its own log was the only record. Replayed through agent-custody, the call is denied, and an auditor can prove it. [Watch the 30-second film with sound](https://agent-custody.dev/advanced#product-overview-film).*
 
 agent-custody is infrastructure to authorize the actions of AI agents and to account for them:
 
