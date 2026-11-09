@@ -3,8 +3,9 @@
 # out are a tool call through the gateway (which holds the tool credentials) and a connection through the witness
 # (which decides it by policy and receipts it). Without this, HTTPS_PROXY is advice an agent can ignore.
 #
-#   docker compose -f docker-compose.yaml -f lockdown/docker-compose.yaml run --rm egress keygen --dir /data/keys --name egress
 #   docker compose -f docker-compose.yaml -f lockdown/docker-compose.yaml --profile demo-agent up -d
+#
+# The witness creates its key on first start and prints the public half in its log; verifiers check its receipts with it.
 #
 # Set EGRESS_SECRET_RESEARCH_AGENT in .env (openssl rand -hex 32), and the same value in the agent's HTTPS_PROXY. The
 # `agent` service is a stand-in: replace its image and entrypoint with your agent's, keep its network, proxy, and
@@ -25,11 +26,12 @@ services:
 
   egress:
     image: ghcr.io/svayatta/agent-custody-gateway:${AGENT_CUSTODY_GATEWAY_VERSION:?set AGENT_CUSTODY_GATEWAY_VERSION in .env to a release version}
-    command: ["egress", "--config", "/egress/egress.json", "--host", "0.0.0.0", "--port", "8791"]
+    command: ["egress"]
     restart: unless-stopped
     user: "${GATEWAY_UID:-10001}:${GATEWAY_GID:-10001}"
     # only the agents' proxy secrets: the witness holds no tool credential
     environment:
+      EGRESS_CONFIG: /egress/egress.json
       EGRESS_SECRET_RESEARCH_AGENT: ${EGRESS_SECRET_RESEARCH_AGENT:-}
     volumes:
       - ./lockdown/config:/egress:ro
@@ -48,6 +50,9 @@ services:
     profiles: [demo-agent]
     image: ghcr.io/svayatta/agent-custody-gateway:${AGENT_CUSTODY_GATEWAY_VERSION:?set AGENT_CUSTODY_GATEWAY_VERSION in .env to a release version}
     entrypoint: ["node", "-e", "setInterval(() => {}, 1 << 30)"]
+    # the image's healthcheck is for a gateway or a witness; this stand-in is neither
+    healthcheck:
+      disable: true
     environment:
       HTTPS_PROXY: http://research-agent:${EGRESS_SECRET_RESEARCH_AGENT:-}@egress:8791
       HTTP_PROXY: http://research-agent:${EGRESS_SECRET_RESEARCH_AGENT:-}@egress:8791

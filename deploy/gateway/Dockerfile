@@ -24,14 +24,16 @@ RUN chmod +x /usr/local/bin/gateway-entrypoint.sh
 USER custody
 WORKDIR /data
 VOLUME ["/data"]
-EXPOSE 8790
+EXPOSE 8790 8791
 
 ENV DATA_DIR=/data \
     GATEWAY_CONFIG=/config/gateway.json \
-    GATEWAY_PORT=8790
+    GATEWAY_PORT=8790 \
+    EGRESS_PORT=8791
 
+# healthy when the gateway answers, or the egress witness when the container runs in egress mode
 HEALTHCHECK --interval=15s --timeout=3s --start-period=10s --retries=3 \
-  CMD wget -qO- "http://127.0.0.1:${GATEWAY_PORT}/health" > /dev/null || exit 1
+  CMD wget -qO- "http://127.0.0.1:${GATEWAY_PORT}/health" > /dev/null 2>&1 || wget -qO- "http://127.0.0.1:${EGRESS_PORT}/.well-known/agent-custody-egress" > /dev/null || exit 1
 
 ENTRYPOINT ["gateway-entrypoint.sh"]
 CMD ["serve"]

@@ -1,6 +1,7 @@
 #!/bin/sh
 # serve (default): starts the shared gateway on 0.0.0.0, creating the gateway key on first start.
 # console: starts the admin console for that gateway (token from CONSOLE_TOKEN), as a separate container of this image.
+# egress: starts the egress witness on 0.0.0.0, creating its key on first start; extra arguments replace the defaults.
 # init: writes a starter config, an example policy, and a demo principal key and grant into /config.
 # Anything else is passed to the agent-custody CLI, so `docker exec <container> revoke --config ... --grant ...` works.
 set -eu
@@ -10,6 +11,9 @@ set -eu
 : "${GATEWAY_KEY:=$DATA_DIR/keys/gateway.key}"
 : "${GATEWAY_PORT:=8790}"
 : "${GATEWAY_IDLE_MINUTES:=30}"
+: "${EGRESS_CONFIG:=/config/egress.json}"
+: "${EGRESS_KEY:=$DATA_DIR/keys/egress.key}"
+: "${EGRESS_PORT:=8791}"
 config_dir=$(dirname "$GATEWAY_CONFIG")
 
 case "${1:-serve}" in
@@ -34,6 +38,25 @@ case "${1:-serve}" in
       *) echo "gateway: GATEWAY_CHECK must be strict, advisory, or off" >&2; exit 1 ;;
     esac
     exec agent-custody gateway --config "$GATEWAY_CONFIG" --http --host 0.0.0.0 --port "$GATEWAY_PORT" --idle-minutes "$GATEWAY_IDLE_MINUTES"
+    ;;
+  egress)
+    # the egress witness: the same image, a container of its own that holds only the agents' proxy secrets, never a tool
+    # credential. Its key is not the gateway's: verifiers trust it separately. The key is created at EGRESS_KEY and the
+    # healthcheck probes EGRESS_PORT, so a config whose identity.keyFile differs, or your own arguments, need both set to match.
+    shift
+    if [ "$#" -eq 0 ] && [ ! -f "$EGRESS_CONFIG" ]; then
+      echo "gateway: $EGRESS_CONFIG not found. Mount the witness config there, or set EGRESS_CONFIG" >&2
+      exit 1
+    fi
+    if [ ! -f "$EGRESS_KEY" ]; then
+      key_dir=$(dirname "$EGRESS_KEY"); key_name=$(basename "$EGRESS_KEY" .key)
+      mkdir -p "$key_dir"
+      agent-custody keygen --dir "$key_dir" --name "$key_name" >&2
+      echo "gateway: created the egress witness key. Verifiers check its receipts with its public key:" >&2
+      cat "$key_dir/$key_name.pub" >&2
+    fi
+    if [ "$#" -gt 0 ]; then exec agent-custody egress "$@"; fi
+    exec agent-custody egress --config "$EGRESS_CONFIG" --host 0.0.0.0 --port "$EGRESS_PORT"
     ;;
   console)
     # the admin console, as a service of its own: the same image, the same config and data, and a token kept in a file that

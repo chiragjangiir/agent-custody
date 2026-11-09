@@ -92,6 +92,7 @@ case "$code" in
 esac
 
 # 2. Through the witness. The proxy credential goes to curl on stdin, never on a command line that ps shows.
+# The secret is used as written in HTTPS_PROXY: a percent-encoded one, or one with " or \, fails here with 407. Use hex.
 touch "$work/before"
 set +e
 connect=$(printf 'proxy-user = "%s:%s"\n' "$AGENT_ID" "$EGRESS_SECRET" \

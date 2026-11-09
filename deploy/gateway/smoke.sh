@@ -1,15 +1,19 @@
 #!/bin/sh
 # Smoke test for the gateway image: init writes a config, the container becomes healthy, a connection with no grant is
-# refused and one with the demo grant gets a session, and `docker stop` closes the gateway (exit 0, not SIGKILL).
-# Usage: ./smoke.sh <image>        needs docker, curl, and a free port 18790
+# refused and one with the demo grant gets a session, and `docker stop` closes the gateway (exit 0, not SIGKILL). Then the
+# same image in egress mode: the witness creates its key, becomes healthy, refuses a connection with no proxy credential
+# (407) and one its policy does not permit (403) before connecting anywhere, and stops with exit 0.
+# Usage: ./smoke.sh <image>        needs docker, curl, and free ports 18790 and 18791
 set -eu
 image="${1:?usage: smoke.sh <image>}"
 port=18790
 work=$(mktemp -d)
 name="gateway-smoke-$$"
-cleanup() { docker rm -f "$name" > /dev/null 2>&1 || true; rm -rf "$work"; }
+eport=18791
+ename="egress-smoke-$$"
+cleanup() { docker rm -f "$name" "$ename" > /dev/null 2>&1 || true; rm -rf "$work"; }
 trap cleanup EXIT
-fail() { echo "smoke: $*" >&2; docker logs "$name" >&2 2>&1 || true; exit 1; }
+fail() { echo "smoke: $*" >&2; docker logs "$name" >&2 2>&1 || true; docker logs "$ename" >&2 2>&1 || true; exit 1; }
 
 mkdir "$work/config"
 docker run --rm -u "$(id -u):$(id -g)" -v "$work/config:/config" "$image" init > /dev/null 2>&1 || fail "init failed"
@@ -37,3 +41,28 @@ code=$(docker inspect -f '{{.State.ExitCode}}' "$name")
 [ "$code" = 0 ] || fail "stopped with exit code $code, not 0 (SIGKILL is 137)"
 [ "$elapsed" -le 8 ] || fail "docker stop took ${elapsed}s: the gateway ignored SIGTERM"
 echo "smoke: ok (healthy, no-grant refused, demo grant accepted, stopped in ${elapsed}s with exit 0)"
+
+mkdir "$work/egress"
+cat > "$work/egress/egress.json" <<'JSON'
+{ "identity": { "keyFile": "/data/keys/egress.key" }, "agents": [{ "id": "smoke-agent", "secretEnv": "EGRESS_SECRET_SMOKE" }],
+  "policyFile": "policy.cedar", "receiptsDir": "/data/receipts", "logFile": "/data/log.jsonl" }
+JSON
+printf 'permit(principal == Agent::"smoke-agent", action == Action::"example.invalid:443", resource);\n' > "$work/egress/policy.cedar"
+secret=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')
+docker run -d --name "$ename" -v "$work/egress:/egress:ro" -e EGRESS_CONFIG=/egress/egress.json -e EGRESS_SECRET_SMOKE="$secret" \
+  -p "127.0.0.1:$eport:8791" "$image" egress > /dev/null
+i=0
+until [ "$(docker inspect -f '{{.State.Health.Status}}' "$ename")" = healthy ]; do
+  i=$((i + 1)); [ "$i" -le 30 ] || fail "the egress witness was not healthy after 60 s"
+  sleep 2
+done
+docker logs "$ename" 2>&1 | grep -q "created the egress witness key" || fail "egress mode did not create the witness key"
+curl -fsS "http://127.0.0.1:$eport/.well-known/agent-custody-egress" | grep -q '"keyid"' || fail "the witness did not answer its well-known route"
+# both refusals happen before the witness connects anywhere: nothing leaves the runner
+via() { curl -s -o /dev/null -w '%{http_connect}' -x "http://127.0.0.1:$eport" "$@" https://api.stripe.com/ || true; }
+[ "$(via)" = 407 ] || fail "a connection with no proxy credential was not refused with 407"
+[ "$(via -U "smoke-agent:$secret")" = 403 ] || fail "a destination the policy does not permit was not refused with 403"
+docker stop "$ename" > /dev/null
+code=$(docker inspect -f '{{.State.ExitCode}}' "$ename")
+[ "$code" = 0 ] || fail "the witness stopped with exit code $code, not 0"
+echo "smoke: ok (egress mode: key created, healthy, 407 without a credential, 403 for a refused destination, stopped with exit 0)"

@@ -20,24 +20,16 @@ spec:
         runAsNonRoot: true
         runAsUser: 10001
         fsGroup: 10001
-      initContainers:
-        # the witness's signing key, made once on the volume; verifiers check its receipts with the public half
-        - name: keygen
-          image: ghcr.io/svayatta/agent-custody-gateway
-          command: ["sh", "-c", "[ -f /data/keys/egress.key ] || agent-custody keygen --dir /data/keys --name egress"]
-          volumeMounts:
-            - { name: data, mountPath: /data }
-          securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
-            capabilities: { drop: ["ALL"] }
       containers:
         - name: egress
           image: ghcr.io/svayatta/agent-custody-gateway
-          args: ["egress", "--config", "/egress/egress.json", "--host", "0.0.0.0", "--port", "8791"]
+          # egress mode: creates the witness's signing key on the volume on first start; verifiers check receipts with its public half
+          args: ["egress"]
           ports:
             - { name: proxy, containerPort: 8791 }
           # the agents' proxy secrets; the witness holds no tool credential
+          env:
+            - { name: EGRESS_CONFIG, value: /egress/egress.json }
           envFrom:
             - secretRef: { name: egress-env }
           volumeMounts:
