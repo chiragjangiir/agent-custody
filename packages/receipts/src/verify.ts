@@ -1,4 +1,5 @@
 // Independent verification of a receipt bundle. Needs only public keys, and optionally a copy of the log.
+import { internalAddress, isAddressLiteral, sameAddress } from "./addresses.ts";
 import { canonicalize, digestOf, dsseVerifiers, dsseVerify, type Envelope, type PublicKeyRef } from "./crypto.ts";
 import { isApprovalTime, verifyApproval, verifyApprovalStatement } from "./approval.ts";
 import { digestSaltFor, getAt, isCommitment, pathKey, pathText, restorePaths, under, type How } from "./capture.ts";
@@ -189,7 +190,7 @@ export function verifyBundle(bundle: ReceiptBundle, opts: VerifyOptions): Verify
   if (!add("structural parts in clear", !broken, broken ?? undefined)) return done(null);
   const p = st.predicate;
 
-  add("issuer kind is known", p.issuer.kind === "gateway" || p.issuer.kind === "sdk" || p.issuer.kind === "door", `${p.issuer.kind}${p.issuer.framework ? ` / ${p.issuer.framework}` : ""}`);
+  add("issuer kind is known", p.issuer.kind === "gateway" || p.issuer.kind === "sdk" || p.issuer.kind === "door" || p.issuer.kind === "egress", `${p.issuer.kind}${p.issuer.framework ? ` / ${p.issuer.framework}` : ""}`);
   add("issuer keyid matches signer", p.issuer.keyid === sig.keyid);
   if (opts.requireStrict) {
     add("strict mode in force", p.issuer.kind === "gateway" && p.issuer.strict === true, p.issuer.strict === true ? undefined : "the issuer does not say it ran in strict mode");
@@ -215,6 +216,25 @@ export function verifyBundle(bundle: ReceiptBundle, opts: VerifyOptions): Verify
   }
   // A door decides every arrival by policy; an arrival carries a grant only when it chose to present one.
   if (p.issuer.kind === "door") add("door receipt carries a policy decision", p.policy !== null);
+  // An egress witness saw a connection that went around the gateway: where it went and how much, never what was sent.
+  // Its destination is its own observation; its agent is only as good as the proxy credential it checked.
+  if (p.issuer.kind === "egress") {
+    add("egress receipt carries a policy decision", p.policy !== null);
+    const dest = Object.hasOwn(p.facts, "destination") ? p.facts.destination : undefined;
+    const seen = dest?.value as { host?: unknown; port?: unknown } | undefined;
+    const name = typeof seen?.host === "string" && typeof seen.port === "number" ? `${seen.host.includes(":") ? `[${seen.host}]` : seen.host}:${seen.port}` : undefined;
+    add("egress destination observed", p.tool.provenance === "observed" && dest?.provenance === "observed" && name === p.tool.name, name === p.tool.name ? `${p.tool.name}; an observed bypass of the gateway, not a record of what was sent` : `the destination fact names ${name ?? "nothing"}, the receipt ${p.tool.name}`);
+    const relayed = p.execution.status === "executed" || p.execution.status === "failed" || p.execution.status === "error";
+    add("egress relayed only for a checked agent", !relayed || p.agent.provenance === "observed", p.agent.provenance === "observed" ? `${p.agent.id}, by the proxy credential the witness checked` : relayed ? `the connection was ${p.execution.status} for an agent the witness did not check` : "no agent was checked and nothing was relayed");
+    add("egress open committed before relaying", !relayed || !!p.authorization, relayed ? (p.authorization ? "the connection was in the log before any byte moved" : `the connection was ${p.execution.status} with nothing committed first`) : "nothing was relayed");
+    // An IP literal is the action itself: the peer must be that very address. A host name must have led to a public address.
+    const host = typeof seen?.host === "string" ? seen.host : "";
+    const literal = isAddressLiteral(host);
+    const reached = p.execution.status === "executed" || p.execution.status === "failed";
+    const peer = p.execution.status === "executed" || p.execution.status === "failed" ? (p.execution.result as { peer?: unknown } | null)?.peer : undefined;
+    const peerOk = typeof peer === "string" && (literal ? sameAddress(peer, host) : !internalAddress(peer));
+    add("egress peer matches the destination", !reached || peerOk, !reached ? "no connection was made" : literal ? `${host}, an address the policy named, reached ${typeof peer === "string" ? peer : "no recorded peer"}` : `${host} reached ${typeof peer === "string" ? peer : "no recorded peer"}${peerOk ? ", a public address" : ""}`);
+  }
 
   if (p.delegation) {
     const del = verifyDelegation(p.delegation.envelope, opts.principalKeys);
@@ -536,6 +556,7 @@ export function auditExtends(older: Envelope, newer: Envelope, proof: string[], 
 const ISSUER_NOTE: Record<string, string> = {
   gateway: "enforced outside the agent's process; the agent could neither skip nor forge this receipt",
   sdk: "self-reported by the agent's own process; tamper-evident after issue, but nothing here was enforced outside the agent",
+  egress: "observed by a forward proxy in the agent's network path, for a connection that went around the gateway: where it went and how much, never what was sent; the agent is known only by the proxy credential the witness checked, and a connection that skipped the proxy (no lockdown) leaves no receipt at all",
 };
 
 /** Human-readable report: checks, then every field with its provenance so the reader knows what was proven vs. claimed. */

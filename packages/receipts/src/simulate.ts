@@ -164,7 +164,7 @@ export function simulatePolicy(policyText: string, receipts: Iterable<ReceiptPre
     }
     digests.add(previous.policyDigest);
     if (!receiptId || !tool || typeof original.agent.id !== "string" || !original.agent.id
-      || !Number.isFinite(Date.parse(original.timestamp)) || !["sdk", "gateway", "door"].includes(original.issuer.kind)) {
+      || !Number.isFinite(Date.parse(original.timestamp)) || !["sdk", "gateway", "door", "egress"].includes(original.issuer.kind)) {
       skip("malformed receipt: receipt id, tool, agent, timestamp, or issuer is invalid"); continue;
     }
     const restored = restorePaths(original, original.capture, options.disclosures?.get(receiptId), options.captureKey);

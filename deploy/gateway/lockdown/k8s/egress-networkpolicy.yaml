@@ -1,0 +1,31 @@
+# The witness itself: only locked-down agents may connect to it, and it may not reach the cloud metadata addresses, loopback,
+# or the private ranges on their behalf. The witness already refuses an internal address for a host name before it
+# connects; this is the second layer, and the only one for an IP literal a policy names. Widen `except` to your own
+# internal networks. NetworkPolicy does not govern loopback, so 127.0.0.0/8 here is documentation as much as control.
+# IPv6 stays denied because this block is IPv4: a later `::/0` rule needs the same exceptions (::1/128, fc00::/7, fe80::/10).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: agent-custody-egress-witness
+  namespace: agent-custody-gateway
+spec:
+  podSelector:
+    matchLabels: { app: agent-custody-egress }
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector: { matchLabels: { agent-custody.dev/agents: "true" } }
+          podSelector: { matchLabels: { agent-custody.dev/egress: locked } }
+      ports:
+        - { port: 8791, protocol: TCP }
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [0.0.0.0/8, 127.0.0.0/8, 169.254.0.0/16, 192.0.0.0/24, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10]
+    - to:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: kube-system } }
+          podSelector: { matchLabels: { k8s-app: kube-dns } }
+      ports:
+        - { port: 53, protocol: UDP }
+        - { port: 53, protocol: TCP }

@@ -304,6 +304,47 @@ export const DoorConfigSchema = z.object({
   .refine((c) => !c.log || !!c.log.keys?.length, { message: "a remote log needs log.keys: the log's public key files, pinned, to check its answer before a request is relayed" });
 export type DoorConfig = z.infer<typeof DoorConfigSchema>;
 
+/**
+ * The egress witness: a forward proxy in the agent's network path for every connection that does not go to the gateway.
+ * Each agent proves who it is with its own proxy credential (`Proxy-Authorization: Basic`, id and secret); the secret
+ * comes from the environment, never from the file. The Cedar policy decides per destination, and every connection,
+ * relayed or refused, is receipted. It records where traffic went, never what was sent: there is no TLS interception.
+ */
+export const EgressConfigSchema = z.object({
+  identity: z.object({ keyFile: z.string() }),
+  /** the agents the witness knows, each with the environment variable that holds its proxy secret */
+  agents: z.array(z.object({ id: z.string().min(1).max(200).regex(/^[^:\s]+$/, "an agent id has no colon or whitespace: Basic credentials split at the first colon"), secretEnv: z.string().min(1) })).min(1),
+  policyFile: z.string(),
+  /** "enforce" (default) refuses what the policy denies; "observe" relays every connection from a known agent and records the decision with `enforced: false` */
+  mode: z.enum(["enforce", "observe"]).optional(),
+  /** how long the witness waits for the destination to accept the connection. Default 10 s */
+  connectTimeoutMs: z.number().int().positive().default(10_000),
+  /** a relayed connection with no bytes either way for this long is closed. Default 5 minutes */
+  idleTimeoutMs: z.number().int().positive().default(300_000),
+  /** connections handled at once; past this the next is answered 503 and is not relayed or receipted. Default 256 */
+  maxInFlight: z.number().int().positive().default(256),
+  receiptsDir: z.string(),
+  logFile: z.string().optional(),
+  log: LogSchema.optional(),
+  otel: OtelSchema.optional(),
+  splunk: SplunkSchema.optional(),
+}).refine(hasOneLog, oneLog).refine((c) => new Set(c.agents.map((a) => a.id)).size === c.agents.length, { message: "agent ids must be unique" });
+export type EgressConfig = z.infer<typeof EgressConfigSchema>;
+
+export function loadEgressConfig(path: string): EgressConfig {
+  const cfg = EgressConfigSchema.parse(JSON.parse(readFileSync(path, "utf8")));
+  const base = dirname(resolve(path));
+  const r = (p: string) => resolve(base, p);
+  return {
+    ...cfg,
+    identity: { keyFile: r(cfg.identity.keyFile) },
+    policyFile: r(cfg.policyFile),
+    receiptsDir: r(cfg.receiptsDir),
+    ...(cfg.logFile ? { logFile: r(cfg.logFile) } : {}),
+    ...(cfg.log?.keys ? { log: { ...cfg.log, keys: cfg.log.keys.map(r) } } : {}),
+  };
+}
+
 export function loadDoorConfig(path: string): DoorConfig {
   const cfg = DoorConfigSchema.parse(JSON.parse(readFileSync(path, "utf8")));
   const base = dirname(resolve(path));

@@ -57,7 +57,9 @@ jobs:
         run: |
           echo ci > "$RUNNER_TEMP/console-token"
           CONSOLE_TOKEN_FILE="$RUNNER_TEMP/console-token" docker compose -f deploy/gateway/docker-compose.yaml --profile init --profile tls --profile console config -q
+          CONSOLE_TOKEN_FILE="$RUNNER_TEMP/console-token" docker compose -f deploy/gateway/docker-compose.yaml -f deploy/gateway/lockdown/docker-compose.yaml --profile demo-agent config -q
       - run: kubectl kustomize deploy/gateway/k8s > /dev/null
+      - run: kubectl kustomize deploy/gateway/lockdown/k8s > /dev/null
       - run: shellcheck deploy/gateway/gateway-entrypoint.sh deploy/gateway/smoke.sh .github/scripts/*.sh
 
   build:

@@ -24,6 +24,9 @@ import { createDoorHost, RECEIPT_HEADER, serveDoor } from "../src/door.ts";
 import { grantHeader } from "../src/gateway-http.ts";
 import { loadDoorConfig } from "../src/config.ts";
 import { buildDoorFixture, startOrigin } from "./door-fixture.ts";
+import { createEgressHost, serveEgress } from "../src/egress.ts";
+import { loadEgressConfig } from "../src/config.ts";
+import { EGRESS_AGENT, EGRESS_SECRET, buildEgressFixture, connectThrough, proxyAuth, startEcho } from "./egress-fixture.ts";
 
 const out = join(import.meta.dirname, "..", "vectors");
 const decode = (b: ReceiptBundle) => JSON.parse(Buffer.from(b.envelope.payload, "base64").toString()) as ReceiptStatement;
@@ -550,6 +553,70 @@ try {
     const doorKey = loadPrivateKey(join(dfx.dir, "keys", "door.key"));
     addCase({ name: "resigned-door-no-policy", description: "A door receipt re-signed with its policy decision removed. A door decides every arrival by policy, so `door receipt carries a policy decision` fails.", bundle: resigned(readCatalogue, doorKey, (st) => { st.predicate.policy = null; }), ...D, principalKeys: [], log: dlog });
   } finally { await door.close(); await dhost.close(); await origin.close(); }
+}
+
+// ---- the egress witness: receipts for connections that went around the gateway, issuer kind "egress" ----
+{
+  const echo = await startEcho();
+  const efx = buildEgressFixture(mkdtempSync(join(tmpdir(), "vectors-egress-")));
+  key("egress", efx.witnessPub);
+  const ehost = await createEgressHost(loadEgressConfig(efx.configFile));
+  const witness = await serveEgress(ehost, { port: 0, log: () => {} });
+  const wport = Number(new URL(witness.url).port);
+  try {
+    const attempt = async (target: string, auth?: string, send?: string) => {
+      const a = await connectThrough(wport, target, auth);
+      if (a.status === 200 && send) await new Promise((r) => { a.socket.once("data", r); a.socket.write(send); });
+      a.socket.end();
+      const file = join(efx.receiptsDir, `${a.headers[RECEIPT_HEADER]}.json`);
+      for (let i = 0; i < 200 && !nodeFs.existsSync(file); i++) await new Promise((r) => setTimeout(r, 25));
+      return bundleFile(efx.receiptsDir, a.headers[RECEIPT_HEADER]!);
+    };
+    const auth = proxyAuth(EGRESS_AGENT, EGRESS_SECRET);
+    const refusedProvider = await attempt("api.stripe.com:443", auth);
+    const tunnel = await attempt(`127.0.0.1:${echo.port}`, auth, "hello");
+    const anonymous = await attempt(`127.0.0.1:${echo.port}`);
+    const E = { issuerKeys: ["egress"], principalKeys: [] as string[], logKeys: [] as string[] };
+    const elog = logLines(efx.logFile);
+    addCase({ name: "egress-provider-denied", description: "A locked-down agent, identified by the proxy credential the witness checked, tries a direct call to a payment provider (CONNECT api.stripe.com:443). The policy refuses it: issuer kind egress, agent observed, destination observed, denied, nothing relayed. An observed bypass of the gateway, not a record of what was sent. Verifies with the witness's key alone.", bundle: refusedProvider, ...E, log: elog });
+    addCase({ name: "egress-tunnel-executed", description: "An allowed CONNECT tunnel: the result records the address connected to, the open and close times, the bytes each way, and how it ended, never the payload.", bundle: tunnel, ...E, log: elog });
+    addCase({ name: "egress-no-credential-denied", description: "A connection with no proxy credential: refused with 407 and receipted. The agent is `unknown`, claimed; the policy saw principal Agent::\"unknown\".", bundle: anonymous, ...E, log: elog });
+    const egressKey = loadPrivateKey(join(efx.dir, "keys", "egress.key"));
+    addCase({ name: "resigned-egress-no-policy", description: "An egress receipt re-signed with its policy decision removed. The witness decides every connection by policy, so `egress receipt carries a policy decision` fails.", bundle: resigned(refusedProvider, egressKey, (st) => { st.predicate.policy = null; }), ...E, log: elog });
+    addCase({ name: "resigned-egress-unchecked-agent-relayed", description: "The executed tunnel re-signed with the agent claimed: the witness relays only for an agent whose credential it checked, so `egress relayed only for a checked agent` fails; the committed authorization still names the checked agent, so `authorization names this call` fails too.", bundle: resigned(tunnel, egressKey, (st) => { st.predicate.agent = { id: "unknown", provenance: "claimed" }; }), ...E, log: elog });
+    addCase({ name: "resigned-egress-open-not-committed", description: "The executed tunnel re-signed with its authorization removed: the witness commits every relayed connection to the log before any byte moves, so `egress open committed before relaying` fails.", bundle: resigned(tunnel, egressKey, (st) => { delete st.predicate.authorization; }), ...E, log: elog });
+    addCase({ name: "resigned-egress-internal-peer", description: "The executed tunnel re-signed as a connection to the host name registry.npmjs.org:443 whose recorded peer is 169.254.169.254, the cloud metadata address, with every digest recomputed. The witness never dials an internal address for a host name, so `egress peer matches the destination` fails; the authorization still names the original destination, so `authorization names this call` fails too.", bundle: resigned(tunnel, egressKey, (st) => {
+      const p = st.predicate;
+      const dest = { ...(p.facts.destination!.value as Record<string, unknown>), host: "registry.npmjs.org", port: 443 };
+      p.facts.destination = { ...p.facts.destination!, value: dest, resultDigest: digestOf(dest) };
+      p.tool = { name: "registry.npmjs.org:443", provenance: "observed" };
+      p.request = { ...p.request, args: { ...p.request.args, host: "registry.npmjs.org", port: 443 } };
+      p.request.argsDigest = digestOf(p.request.args);
+      st.subject[0]!.digest.sha256 = p.request.argsDigest;
+      const ex = p.execution as { result: Record<string, unknown>; resultDigest: string };
+      ex.result = { ...ex.result, peer: "169.254.169.254" };
+      ex.resultDigest = digestOf(ex.result);
+    }), ...E, log: elog });
+    addCase({ name: "resigned-egress-literal-peer-mismatch", description: "The executed tunnel to the IP literal 127.0.0.1 re-signed with its recorded peer changed to 169.254.169.254, the result digest recomputed. An IP literal is the Cedar action itself, so the peer must be that very address: `egress peer matches the destination` fails.", bundle: resigned(tunnel, egressKey, (st) => {
+      const ex = st.predicate.execution as { result: Record<string, unknown>; resultDigest: string };
+      ex.result = { ...ex.result, peer: "169.254.169.254" };
+      ex.resultDigest = digestOf(ex.result);
+    }), ...E, log: elog });
+    addCase({ name: "resigned-egress-noncanonical-host", description: "The executed tunnel re-signed as a connection to the host 010.0.0.1 whose peer is 8.0.0.1, every digest recomputed. A part with a leading zero is not an IPv4 address in any of the three verifiers (Python's ipaddress refuses it too), so the host is read as a name and its public peer passes `egress peer matches the destination` everywhere; the verifiers must agree. The authorization still names the original destination, so `authorization names this call` fails.", bundle: resigned(tunnel, egressKey, (st) => {
+      const p = st.predicate;
+      const port = (p.facts.destination!.value as { port: number }).port;
+      const dest = { ...(p.facts.destination!.value as Record<string, unknown>), host: "010.0.0.1" };
+      p.facts.destination = { ...p.facts.destination!, value: dest, resultDigest: digestOf(dest) };
+      p.tool = { name: `010.0.0.1:${port}`, provenance: "observed" };
+      p.request = { ...p.request, args: { ...p.request.args, host: "010.0.0.1" } };
+      p.request.argsDigest = digestOf(p.request.args);
+      st.subject[0]!.digest.sha256 = p.request.argsDigest;
+      const ex = p.execution as { result: Record<string, unknown>; resultDigest: string };
+      ex.result = { ...ex.result, peer: "8.0.0.1" };
+      ex.resultDigest = digestOf(ex.result);
+    }), ...E, log: elog });
+    addCase({ name: "resigned-egress-destination-mismatch", description: "The refused provider call re-signed to name another destination than the one the witness observed: `egress destination observed` fails.", bundle: resigned(refusedProvider, egressKey, (st) => { st.predicate.tool = { name: "registry.npmjs.org:443", provenance: "observed" }; }), ...E, log: elog });
+  } finally { await ehost.close(); await witness.close(); await echo.close(); }
 }
 
 writeFileSync(join(out, "receipts.json"), JSON.stringify({ version: "0.2", generated: new Date().toISOString(), note: "Each case: verify `bundle` with the named keys (see `keys`) and, when `log` is not null, a copy of the log whose lines are these leaves. `expected.failing` lists the check names that must fail; `expected.ok` is true only when it is empty.", keys, cases }, null, 2) + "\n");

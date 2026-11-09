@@ -1,0 +1,30 @@
+# Default-deny egress for every agent pod labelled agent-custody.dev/egress=locked: it may reach the gateway (tool calls,
+# with the credentials the gateway holds), the egress witness (everything else, decided and receipted), and the cluster
+# DNS, and nothing else. DNS stays open because the agent resolves the two services by name; a resolver that forwards
+# to the internet can still carry data in queries, which the witness does not see.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: agent-custody-egress-lockdown
+  namespace: agents
+spec:
+  podSelector:
+    matchLabels: { agent-custody.dev/egress: locked }
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: agent-custody-gateway } }
+          podSelector: { matchLabels: { app: agent-custody-gateway } }
+      ports:
+        - { port: 8790, protocol: TCP }
+    - to:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: agent-custody-gateway } }
+          podSelector: { matchLabels: { app: agent-custody-egress } }
+      ports:
+        - { port: 8791, protocol: TCP }
+    - to:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: kube-system } }
+          podSelector: { matchLabels: { k8s-app: kube-dns } }
+      ports:
+        - { port: 53, protocol: UDP }
+        - { port: 53, protocol: TCP }

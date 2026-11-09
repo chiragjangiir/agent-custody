@@ -1,0 +1,9 @@
+{
+  "identity": { "keyFile": "/data/keys/egress.key" },
+  "agents": [
+    { "id": "research-agent", "secretEnv": "EGRESS_SECRET_RESEARCH_AGENT" }
+  ],
+  "policyFile": "egress-policy.cedar",
+  "receiptsDir": "/data/receipts",
+  "logFile": "/data/log.jsonl"
+}

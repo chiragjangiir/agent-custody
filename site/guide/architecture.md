@@ -374,12 +374,12 @@ sequenceDiagram
 
 ## What this does and does not cover
 
-- **Only calls through the gateway.** A credential in the agent's environment, a second direct route in the host config, or code that calls an API on its own is outside it. Taking those away is a deployment decision.
+- **Only calls through the gateway.** A credential in the agent's environment, a second direct route in the host config, or code that calls an API on its own is outside it. Taking those away is a deployment decision: [credential custody and lockdown](/guide/credential-custody) shows how, and the egress witness receipts the direct connections that remain.
 - **The SDK and sidecar record, they do not prove.** They run in the process they describe, so their receipts are `claimed`.
 - **The hosted log does not see grants or policy.** It sees leaf hashes. A receipt names the grant and carries the policy digest, and a verifier checks both against public keys.
 - **The operator can rewrite a local log.** A remote log, published checkpoints, and a witness are what detect that. The witness ships in the package, but a second, independent operator for our log is still being sought, so today the checkpoints are published and the witness step is not yet independent.
 - **There is no hosted control plane yet.** Grants, revocation and Cedar policy are managed on the customer's gateway; the portal manages the log, tokens, usage and billing.
 - **Failure mode:** a `precommit` tool is withheld while the log is unreachable. That is deliberate and it is a denial of service on the agent.
-- **No transparent egress proxy.** Arbitrary HTTP from agent code is not intercepted.
+- **Egress is witnessed only under lockdown, and never inspected.** The [egress witness](/receipts/egress) is a forward proxy. It receipts, and decides by policy, the connections an agent makes around the gateway. It records the destination, the times, and the byte counts. It never records the payload, because there is no TLS interception, so a receipt shows an observed bypass, not what was done. It sees only traffic sent to it: with no [lockdown](/guide/credential-custody), an agent can ignore `HTTPS_PROXY`, and a protocol other than HTTP never reaches it.
 
 See [the threat model](/receipts/threat-model) for who could make a receipt false and what stops them, and [the hosted log reference](/reference/hosted) for the log's routes.

@@ -6,7 +6,7 @@ import { isProviderAttestation } from "./upstream.ts";
 import { parseArgs } from "node:util";
 import { closeSync, constants as fsConstants, existsSync, fchmodSync, openSync, readFileSync, readdirSync, writeFileSync, writeSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { loadConfig, loadDoorConfig, loadSdkConfig, type A2aUpstreamConfig } from "./config.ts";
+import { loadConfig, loadDoorConfig, loadEgressConfig, loadSdkConfig, type A2aUpstreamConfig } from "./config.ts";
 import { dsseVerify, generateKeyPair, loadPrivateKey, loadPublicKey, writeKeyPair } from "./crypto.ts";
 import type { Envelope } from "./crypto.ts";
 import { createDelegation, decodeDelegation, delegateFrom, grantDigest } from "./delegation.ts";
@@ -22,6 +22,7 @@ import { checkCompleteness, formatCompleteness, stripeSource, type StripeObject 
 import { evmChain } from "./anchor-evm.ts";
 import { serveHttp } from "./gateway-http.ts";
 import { createDoorHost, serveDoor } from "./door.ts";
+import { createEgressHost, serveEgress } from "./egress.ts";
 import { serveA2a } from "./a2a.ts";
 import { PortalStore, sendFollowUps, servePortal, type MailOptions, type OAuthOptions, type Role, type StripeOptions } from "./portal.ts";
 import type { OidcConfig, SamlConfig } from "./sso.ts";
@@ -59,7 +60,7 @@ function untilStopped(): Promise<void> {
   });
   return stopped;
 }
-const SERVICES = new Set(["serve", "witness", "signer", "portal", "log", "console", "door"]);
+const SERVICES = new Set(["serve", "witness", "signer", "portal", "log", "console", "door", "egress"]);
 /** a command that waits for untilStopped(); a stdio gateway runs until its input closes and keeps the default signal behaviour */
 const runsUntilStopped = (cmd: string | undefined, args: string[]) => !!cmd && (SERVICES.has(cmd) || (cmd === "gateway" && (args.includes("--http") || args.includes("--a2a"))));
 
@@ -104,6 +105,10 @@ const USAGE = `agent-custody <command>
                                                    a reverse proxy in front of your own site or API: every arrival classified (verified by a
                                                    trusted grant, claimed, or unknown), decided by the Cedar policy for its route, relayed to the
                                                    origin or refused with 403, and receipted either way; GET /.well-known/agent-custody-door
+  egress  --config <egress.json> [--port 8791] [--host 127.0.0.1]
+                                                   the egress witness: a forward proxy (CONNECT and plain HTTP, no TLS interception) for a
+                                                   locked-down agent's calls that do not go to the gateway. Each agent proves itself with its own
+                                                   Proxy-Authorization; the Cedar policy decides per host:port; every connection is receipted
   init claude-code [--dir <dir>] [--user] [--enforce] [--log-url <url> [--log-id <id>] [--log-token-env NAME] [--log-key <pub>]]
                                                    one command for your own Claude Code sessions: an agent key, sdk.json in observe mode, a starter deny
                                                    policy, and the three hooks in .claude/settings.local.json (--user: ~/.claude/settings.json). Safe to run twice
@@ -351,6 +356,19 @@ async function main(argv: string[]): Promise<number> {
       await untilStopped();
       await running.close();
       await host.close();
+      return 0;
+    }
+    case "egress": {
+      const { values } = parseArgs({ args: rest, options: { config: { type: "string" }, port: { type: "string", default: "8791" }, host: { type: "string", default: "127.0.0.1" } } });
+      if (!values.config) throw new Error("egress needs --config");
+      const cfg = loadEgressConfig(values.config);
+      const host = await createEgressHost(cfg, { autoFlush: true });
+      const running = await serveEgress(host, { port: Number(values.port), host: values.host });
+      console.error(`agent-custody egress: ${running.url} keyid=${host.keyid}; ${cfg.agents.length} agent(s), mode ${cfg.mode ?? "enforce"}; GET /.well-known/agent-custody-egress`);
+      await untilStopped();
+      // the relayed connections first, so that each is receipted as witness-stopped before the listener goes
+      await host.close();
+      await running.close();
       return 0;
     }
     case "init": {

@@ -16,7 +16,7 @@ export const TREEHEAD_TYPE = "application/vnd.agent-custody.treehead+json";
 /**
  * Provenance of a receipt field. This is the honest part of the design.
  *  - attested: signed by a key other than the issuer's (today: the principal's delegation key)
- *  - observed: the issuer obtained this deterministically, outside the agent's control (gateway only)
+ *  - observed: the issuer obtained this deterministically, outside the agent's control (an out-of-process issuer only; an egress witness marks the agent observed when it checked the agent's proxy credential)
  *  - claimed:  originates from the agent, the model, or the agent's own process, with no independent check
  */
 export type Provenance = "attested" | "observed" | "claimed";
@@ -27,8 +27,10 @@ export type Provenance = "attested" | "observed" | "claimed";
  *  - sdk:     an interceptor inside the agent's own process; self-reported, tamper-evident after issue but not before
  *  - door:    an out-of-process enforcement point in front of a business's own HTTP surface; the arriving agent, caller,
  *             or browser could neither skip nor forge it, and has no grant unless it presented one
+ *  - egress:  a forward proxy in a locked-down agent's network path, for connections that do not go to the gateway; it
+ *             saw where traffic went and how much, never what was sent. Each receipt is an observed bypass of the gateway
  */
-export type IssuerKind = "gateway" | "sdk" | "door";
+export type IssuerKind = "gateway" | "sdk" | "door" | "egress";
 
 export interface FactRecord {
   tool: string;

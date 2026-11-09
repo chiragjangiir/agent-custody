@@ -15,6 +15,7 @@ import binascii
 import calendar
 import hashlib
 import hmac
+import ipaddress
 import json
 import os
 import re
@@ -36,6 +37,36 @@ APPROVAL = "application/vnd.agent-custody.approval+json"
 UPSTREAM = "application/vnd.agent-custody.upstream+json"
 
 FORWARDED = ("executed", "failed", "error")
+
+
+# Addresses that are not the public internet; the same list as packages/receipts/src/addresses.ts.
+_INTERNAL_NETWORKS = [ipaddress.ip_network(n) for n in (
+    "0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8", "169.254.0.0/16", "172.16.0.0/12", "192.0.0.0/24",
+    "192.168.0.0/16", "198.18.0.0/15", "224.0.0.0/4", "240.0.0.0/4", "::/128", "::1/128", "fc00::/7", "fe80::/10", "ff00::/8",
+    "64:ff9b:1::/48")]
+_NAT64 = ipaddress.ip_network("64:ff9b::/96")
+
+
+def _address(ip: str):
+    """The address, with an IPv4-mapped one as IPv4, or None when it is not an address."""
+    try:
+        addr = ipaddress.ip_address(ip.strip("[]").split("%")[0])
+    except ValueError:
+        return None
+    if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped is not None:
+        return addr.ipv4_mapped
+    return addr
+
+
+def _internal_address(ip: str) -> bool:
+    """True when ip is not a public address, or not an address at all."""
+    addr = _address(ip)
+    if addr is None:
+        return True
+    if addr.version == 6 and addr in _NAT64:
+        # a DNS64 answer can wrap an internal IPv4 address
+        addr = ipaddress.IPv4Address(int(addr) & 0xFFFFFFFF)
+    return any(addr.version == n.version and addr in n for n in _INTERNAL_NETWORKS)
 STATUSES = ("executed", "failed", "denied", "error", "withheld")
 MAX_CHAIN_DEPTH = 3
 STRIPE_TOLERANCE_SECONDS = 300
@@ -753,13 +784,40 @@ def _verify(bundle: Any, trust: Trust, report: Report, *, log, log_id, require_s
     forwarded = status in FORWARDED
 
     kind = p["issuer"].get("kind")
-    add("issuer kind is known", kind in ("gateway", "sdk", "door"), str(kind))
+    add("issuer kind is known", kind in ("gateway", "sdk", "door", "egress"), str(kind))
     add("issuer keyid matches signer", p["issuer"]["keyid"] in signers, p["issuer"]["keyid"][:12])
     if kind == "gateway":
         add("gateway receipt carries a delegation", "delegation" in p)
         add("gateway receipt carries a policy decision", isinstance(p.get("policy"), dict))
     if kind == "door":
         add("door receipt carries a policy decision", isinstance(p.get("policy"), dict))
+    if kind == "egress":
+        # where a connection around the gateway went and how much, never what was sent; the agent is only as good as
+        # the proxy credential the witness checked
+        add("egress receipt carries a policy decision", isinstance(p.get("policy"), dict))
+        facts = p.get("facts") if isinstance(p.get("facts"), dict) else {}
+        dest = facts.get("destination") if isinstance(facts.get("destination"), dict) else {}
+        seen = dest.get("value") if isinstance(dest.get("value"), dict) else {}
+        host, port = seen.get("host"), seen.get("port")
+        name = None
+        if isinstance(host, str) and isinstance(port, int) and not isinstance(port, bool):
+            name = f"[{host}]:{port}" if ":" in host else f"{host}:{port}"
+        tool = p.get("tool") if isinstance(p.get("tool"), dict) else {}
+        add("egress destination observed", tool.get("provenance") == "observed" and dest.get("provenance") == "observed" and name == tool.get("name"), str(tool.get("name")))
+        agent = p.get("agent") if isinstance(p.get("agent"), dict) else {}
+        add("egress relayed only for a checked agent", not forwarded or agent.get("provenance") == "observed", str(agent.get("id")))
+        add("egress open committed before relaying", not forwarded or isinstance(p.get("authorization"), dict))
+        reached = status in ("executed", "failed")
+        host_s = host if isinstance(host, str) else ""
+        literal = _address(host_s)
+        result = p["execution"].get("result") if reached else None
+        peer = result.get("peer") if isinstance(result, dict) else None
+        if literal is not None:
+            # an IP literal is the action itself: the peer must be that very address
+            peer_ok = isinstance(peer, str) and _address(peer) == literal
+        else:
+            peer_ok = isinstance(peer, str) and not _internal_address(peer)
+        add("egress peer matches the destination", not reached or peer_ok, f"{host_s} reached {peer}")
 
     _delegation_checks(p, trust, add, forwarded and not reconciliation)
     approval_withheld = ["approval", "envelope"] in paths

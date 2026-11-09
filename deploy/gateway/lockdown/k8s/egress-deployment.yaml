@@ -1,0 +1,73 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-custody-egress
+  namespace: agent-custody-gateway
+  labels: { app: agent-custody-egress }
+spec:
+  # One replica: the local log has one writer. Use a remote log (`log` in egress.json) before you run more.
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app: agent-custody-egress }
+  template:
+    metadata:
+      labels: { app: agent-custody-egress }
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+      initContainers:
+        # the witness's signing key, made once on the volume; verifiers check its receipts with the public half
+        - name: keygen
+          image: ghcr.io/svayatta/agent-custody-gateway
+          command: ["sh", "-c", "[ -f /data/keys/egress.key ] || agent-custody keygen --dir /data/keys --name egress"]
+          volumeMounts:
+            - { name: data, mountPath: /data }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+      containers:
+        - name: egress
+          image: ghcr.io/svayatta/agent-custody-gateway
+          args: ["egress", "--config", "/egress/egress.json", "--host", "0.0.0.0", "--port", "8791"]
+          ports:
+            - { name: proxy, containerPort: 8791 }
+          # the agents' proxy secrets; the witness holds no tool credential
+          envFrom:
+            - secretRef: { name: egress-env }
+          volumeMounts:
+            - { name: config, mountPath: /egress, readOnly: true }
+            - { name: data, mountPath: /data }
+            - { name: tmp, mountPath: /tmp }
+          readinessProbe:
+            httpGet: { path: /.well-known/agent-custody-egress, port: proxy }
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { memory: 256Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+      volumes:
+        - name: config
+          configMap: { name: egress-config }
+        - name: data
+          persistentVolumeClaim: { claimName: agent-custody-egress-data }
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: agent-custody-egress-data
+  namespace: agent-custody-gateway
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests: { storage: 1Gi }

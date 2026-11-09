@@ -233,3 +233,13 @@ def test_array_index_keys_come_first_in_numeric_order():
 
 def test_integers_beyond_2_53_print_as_the_double_javascript_reads():
     assert v.canonical_json(12345678901234567890) == "12345678901234567000"
+
+
+def test_egress_addresses_match_the_typescript_list():
+    # the same cases as packages/receipts/test/egress.test.ts: a leading zero is not an address, NAT64 carries its IPv4
+    for a in ("127.0.0.1", "169.254.169.254", "192.0.0.192", "::1", "fd00::1", "::ffff:127.0.0.1", "64:ff9b::a9fe:a9fe", "64:ff9b:1::1", "010.0.0.1", "not-an-address"):
+        assert v._internal_address(a), a
+    for a in ("1.1.1.1", "172.32.0.1", "2606:4700::1111", "::ffff:1.1.1.1", "64:ff9b::808:808"):
+        assert not v._internal_address(a), a
+    assert v._address("010.0.0.1") is None
+    assert v._address("::1") == v._address("0:0:0:0:0:0:0:1")

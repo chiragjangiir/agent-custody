@@ -1,0 +1,24 @@
+# Egress lockdown on Kubernetes: the agents' pods get default-deny egress except the gateway, the egress witness, and
+# the cluster DNS; the witness runs beside the gateway and is the only way out for anything that is not a tool call.
+# A NetworkPolicy does nothing unless the cluster's network plugin enforces it (Calico, Cilium, and most managed
+# CNIs do; flannel alone does not). Test it: from an agent pod, a direct connection out must fail.
+#
+#   kubectl label namespace agents agent-custody.dev/agents=true      the namespace your agents run in
+#   kubectl -n agents label pod <agent> agent-custody.dev/egress=locked   or put the label in the agent's pod template
+#   kubectl -n agent-custody-gateway create configmap egress-config --from-file=../config     egress.json, egress-policy.cedar
+#   kubectl -n agent-custody-gateway create secret generic egress-env --from-literal=EGRESS_SECRET_RESEARCH_AGENT="$(openssl rand -hex 32)"
+#   kubectl apply -k deploy/gateway/lockdown/k8s
+#
+# The agent then gets HTTPS_PROXY=http://research-agent:<secret>@agent-custody-egress.agent-custody-gateway:8791 and
+# NO_PROXY=agent-custody-gateway.agent-custody-gateway. Each manifest names its namespace: change `agents` to yours.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - agent-networkpolicy.yaml
+  - egress-deployment.yaml
+  - egress-service.yaml
+  - egress-networkpolicy.yaml
+# The witness runs from the gateway image: set the release as for the gateway. It needs a release that has `agent-custody egress`.
+images:
+  - name: ghcr.io/svayatta/agent-custody-gateway
+    newTag: "SET-A-RELEASE-VERSION"

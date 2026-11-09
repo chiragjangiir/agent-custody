@@ -63,7 +63,7 @@ The container runs the same check, without `--connect`, each time it starts, and
 | `/data` | the gateway's key (created on first start), receipts, the local log, `revoked.json`, the operations store | a named volume or a persistent volume claim |
 | environment | the credentials the upstreams read (`headerEnv`, `tokenEnv` in `gateway.json`), the log's token | `.env`, a Secret |
 
-Paths in `gateway.json` are relative to `/config`; give absolute `/data/...` paths for anything the gateway writes. The gateway key is created once and printed (public half) in the container log; verifiers check receipts against it, so back the `/data/keys` directory up and keep it. Do not put tool credentials in an agent's environment: an agent that holds a Stripe key can call Stripe directly and nothing here sees it.
+Paths in `gateway.json` are relative to `/config`; give absolute `/data/...` paths for anything the gateway writes. The gateway key is created once and printed (public half) in the container log; verifiers check receipts against it, so back the `/data/keys` directory up and keep it. Do not put tool credentials in an agent's environment: an agent that holds a Stripe key can call Stripe directly, and the gateway does not see it. [Egress lockdown](#egress-lockdown-and-the-witness) closes that route.
 
 For evidence a customer or auditor will accept, point `log` in `gateway.json` at a log run by someone else (`"log": { "url": ..., "tokenEnv": ..., "hashOnly": true, "keys": [...] }`; [usage.md](../../packages/receipts/docs/usage.md), "Logging to a remote log"). `init` configures a local file log and `"precommit": ["*"]`, so every agent call is authorized in the log before it is forwarded; name only the consequential tools once you know them.
 
@@ -80,6 +80,16 @@ For evidence a customer or auditor will accept, point `log` in `gateway.json` at
 | Kubernetes | `kubectl apply -k deploy/gateway/k8s`; the header of [k8s/kustomization.yaml](k8s/kustomization.yaml) lists the steps. |
 | TLS | `docker compose --profile tls up -d` puts Caddy in front on `GATEWAY_HOST`. |
 | the console | `docker compose --profile console up -d` runs the [admin console](../../packages/receipts/docs/console.md) from the same image on `127.0.0.1:8795`: config, tools, receipts with a verdict each, a policy editor that replays recorded calls, and grant revocation. Its token is a Docker secret that only the console service reads: `openssl rand -hex 32 > console-token && chmod 600 console-token` (or `CONSOLE_TOKEN_FILE` in `.env`). It does not go in `.env`, which the gateway reads. The console mounts `./config` read-write, because it edits the policy file, and runs as the same user as the gateway (`GATEWAY_UID` and `GATEWAY_GID`, default 10001), so `sudo chown 10001:10001 config`, or set your own ids and `GATEWAY_DATA=./data` to a directory you own. Keep it on loopback or a private network. |
+
+## Egress lockdown and the witness
+
+`lockdown/` has the manifests that keep agents from going around the gateway. [Credential custody and lockdown](../../site/guide/credential-custody.md) is the guide.
+
+- **`lockdown/k8s`**: a NetworkPolicy that gives agent pods labelled `agent-custody.dev/egress: locked` default-deny egress, except the gateway, the egress witness, and the cluster DNS. It also runs the witness (`agent-custody egress`) from this image, with a NetworkPolicy of its own. Check with `kubectl kustomize deploy/gateway/lockdown/k8s`.
+- **`lockdown/docker-compose.yaml`**: an override for this compose file. The agent sits on an internal network with no route out, and the gateway and the witness are the only services on both networks. Check with `docker compose -f docker-compose.yaml -f lockdown/docker-compose.yaml --profile demo-agent config -q`.
+- **`lockdown/config`**: a starter `egress.json` and `egress-policy.cedar`. Each agent's proxy secret comes from the environment.
+
+The witness records where each connection went and how many bytes went each way. It never records what was sent, because there is no TLS interception. It sees nothing without lockdown, since an agent can ignore `HTTPS_PROXY`, and it relays no protocol other than HTTP. A NetworkPolicy has no effect unless the cluster's network plugin enforces it. The witness needs a release that has `agent-custody egress` ([the egress witness](../../packages/receipts/docs/egress.md)).
 
 ## What a shared gateway means, and its limits
 

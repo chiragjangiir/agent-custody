@@ -4,10 +4,11 @@
 
 Chain of custody for AI agents: a signed receipt for every tool call, checkable with public keys alone. What each check proves, and against whom, is [a table below](#what-a-receipt-proves-and-what-it-does-not).
 
-Three producers, one receipt format, one verifier.
+Four producers, one receipt format, one verifier.
 
 - **The gateway** is an MCP proxy between an agent and the systems it can affect: MCP servers, REST APIs described as tools, and other agents it delegates to over A2A. For every tool call, allowed or denied, it checks a delegation grant signed by the human principal and any required human approval of the exact arguments, gathers the facts the policy needs by calling upstream itself, evaluates a Cedar or Rego policy that fails closed (Rego from a file or from your own OPA server), forwards the call only on allow, and emits a signed receipt appended to a Merkle transparency log.
 - **The door** is the gateway turned around: a reverse proxy in front of your own website, API, or forms. Every arrival, a browser, an API client, a crawler, or an agent, is classified by what it presented (a grant signed by a principal you trust makes it `verified`; an assertion the door cannot check is `claimed`; nothing is `unknown`), decided by a Cedar policy for its route, relayed or refused, and receipted either way with the same receipt. It is the first piece of an agent front door; it does not yet detect agents in web traffic, and says so ([the door](docs/door.md)).
+- **The egress witness** covers the calls that go around the gateway. Under egress lockdown, a locked-down agent's network reaches only the gateway and the witness. The witness is a forward proxy: it identifies the agent by the proxy credential it checked, lets a Cedar policy decide per destination, relays or refuses the connection, and receipts it either way (issuer kind `egress`). It records the destination, the times, and the byte counts. It never records a payload, because there is no TLS interception. It sees nothing when lockdown is off, and it relays no protocol other than HTTP. A receipt is an observed bypass, not a record of what was done.
 - **The SDK** is an interceptor inside the agent's own process, hooked into the framework's tool-call callbacks: Claude Code, the Claude Agent SDK, the OpenAI Agents SDK, the Vercel AI SDK, OpenClaw, DeepSeek Harness, Hermes, Google ADK, LangChain, or any function you wrap. It reaches everything the gateway cannot see and issues the same receipts, labelled as self-reported.
 
 Anyone holding the public keys can verify a receipt offline. The agent is not trusted. The layer around it is, and the receipt says exactly how far that trust extends, starting with who issued it. What the receipt file carries of a call is a choice per tool: a field can be withheld as a commitment or encrypted under your key, and the verifier recomputes the digests when it is shown the values.
@@ -15,6 +16,7 @@ Anyone holding the public keys can verify a receipt offline. The agent is not tr
 - [Reference](https://docs.agent-custody.dev/reference/): every function, endpoint, MCP tool, and command with its request and response
 - [Tutorials](docs/tutorials.md): runnable examples, one per aspect of the code, all executed by the test suite
 - [The door](docs/door.md): a receipted reverse proxy in front of your own site or API; what it knows about an arrival, how an arrival becomes a Cedar request, what the arrival gets back, and what it does not do yet
+- [The egress witness](docs/egress.md): a receipted forward proxy for calls that go around the gateway; lockdown, how the witness knows the agent, the Cedar request per destination, the receipt, and what it cannot see: payloads, traffic when lockdown is off, and non-HTTP protocols
 - [Door signals](docs/door-signals.md): every field of the arrival fact, labelled checked, observed, or a claim, with what it does and does not mean and how a policy should read it
 - [Financial operations](docs/financial-operations.md): durable operation ids, provider idempotency keys, atomic daily budget reservations, and reconciliation receipts for uncertain outcomes
 - [The gateway console](docs/console.md): an admin service for the person who runs a gateway: config, tools, receipts with a verdict each, a policy editor that replays recorded calls before it saves, grant revocation, and an audit trail
@@ -103,18 +105,18 @@ flowchart LR
 
 Three parties hold keys. The **principal** signs a grant saying which agent may use which tools until when. The **issuer**, gateway or SDK, signs every receipt and every tree head. The **verifier** holds only public keys and needs no access to the issuer, the agent, or the upstream system.
 
-## Three producers, one receipt
+## Four producers, one receipt
 
-| | gateway | door | SDK |
-| --- | --- | --- | --- |
-| where it runs | separate process between agent and tools | separate process between the world and your own site or API | inside the agent's process |
-| what it sees | MCP tool calls | every HTTP arrival, by route | whatever the framework's hooks expose |
-| enforcement | yes, denied calls never reach upstream | yes, refused arrivals never reach the origin | only where a hook can block |
-| provenance of its fields | `attested` and `observed` | `observed`; `attested` only when the arrival presented a grant, else `claimed` | `claimed`, all of them |
-| what a verifier learns | the agent could not skip or forge this | the arrival could not skip or forge this; who it was is proven only with a grant | the agent's process reported this and it has not changed since |
-| install | one line in the host's MCP config | a reverse proxy in front of the origin | a hook entry or a wrapped function |
+| | gateway | door | egress witness | SDK |
+| --- | --- | --- | --- | --- |
+| where it runs | separate process between agent and tools | separate process between the world and your own site or API | forward proxy in a locked-down agent's network path | inside the agent's process |
+| what it sees | MCP tool calls | every HTTP arrival, by route | each connection that does not go to the gateway: destination, times, byte counts, never the payload | whatever the framework's hooks expose |
+| enforcement | yes, denied calls never reach upstream | yes, refused arrivals never reach the origin | yes, refused connections are never opened; only under lockdown, since an agent can ignore the proxy | only where a hook can block |
+| provenance of its fields | `attested` and `observed` | `observed`; `attested` only when the arrival presented a grant, else `claimed` | `observed`; the agent is `observed` only through a proxy credential the witness checked, else `claimed` | `claimed`, all of them |
+| what a verifier learns | the agent could not skip or forge this | the arrival could not skip or forge this; who it was is proven only with a grant | the agent connected to this destination around the gateway; not what it sent | the agent's process reported this and it has not changed since |
+| install | one line in the host's MCP config | a reverse proxy in front of the origin | a forward proxy plus egress lockdown (`deploy/gateway/lockdown`) | a hook entry or a wrapped function |
 
-Every receipt names its issuer, and the verifier prints what that issuer kind is worth before anything else. A dashboard full of `sdk` rows is the reason to route the consequential calls through the gateway. The door is the gateway turned around ([the door](docs/door.md)).
+Every receipt names its issuer, and the verifier prints what that issuer kind is worth before anything else. A dashboard full of `sdk` rows is the reason to route the consequential calls through the gateway. The door is the gateway turned around ([the door](docs/door.md)). The egress witness receipts the connections that go around the gateway ([the egress witness](docs/egress.md)).
 
 ### Supported hosts and frameworks
 
@@ -280,6 +282,7 @@ src/gateway.ts     the MCP proxy: a host (key, policy, upstreams, log) and a ses
 src/operations.ts  SQLite operation claims and daily budget reservations, retained across retries and process crashes
 src/gateway-http.ts the gateway over Streamable HTTP: one process, a session per connection, each under the grant it presents
 src/door.ts        the door: a reverse proxy in front of your own HTTP surface; every arrival classified, decided per route, relayed or refused, receipted as issuer kind door
+src/egress.ts      the egress witness: a forward proxy (CONNECT and plain HTTP, no TLS interception) for calls around the gateway; agent by proxy credential, decided per destination, receipted as issuer kind egress
 src/sdk/index.ts   the interceptor: policy decision, record, wrap(tool fn)
 src/sdk/claude.ts  Claude Code command hook and Claude Agent SDK in-process hooks
 src/sdk/openai-agents.ts, vercel-ai.ts, langchain.ts   framework adapters, tested against the real packages
@@ -295,11 +298,11 @@ src/verify.ts      offline verification, the human-readable report, and the audi
 src/claude-init.ts `init claude-code`: the agent key, the observe-mode config, the starter policy, and the three hooks merged into the settings file with absolute paths
 src/deny-report.ts `report`: verifies the receipts of an SDK config and lists the calls the policy would have denied
 templates/         the starter Cedar policy that `init claude-code` copies (shipped in the package)
-src/cli.ts         keygen, grant, gateway, door, init, report, hook, serve, log, prune, verify, reveal, audit, policy simulate
+src/cli.ts         keygen, grant, gateway, door, egress, init, report, hook, serve, log, prune, verify, reveal, audit, policy simulate
 src/retention.ts   pruning the log: leaves become their hashes, bundles are removed, proofs survive
 src/index.ts       the package's public surface; adapters are exported on ./sdk/<framework> subpaths
 tsconfig.build.json  emits dist/ (JavaScript plus declarations) for consumers; the repo itself runs the .ts directly
-scripts/           fake Stripe upstream (signs its results with --key), a second fake upstream, fixture builders for gateway, SDK, and door (with a stand-in origin), the replay builder (`replay.ts`: example 27 and state example 07 as a folder of receipts and public keys anyone can verify with the published packages), demo
+scripts/           fake Stripe upstream (signs its results with --key), a second fake upstream, fixture builders for gateway, SDK, door (with a stand-in origin), and the egress witness (with a stand-in destination), the replay builder (`replay.ts`: example 27 and state example 07 as a folder of receipts and public keys anyone can verify with the published packages), demo
 examples/          runnable tutorials, plus examples/languages/: Python, Go, Java, and Rust clients of the sidecar, run by the test suite, one per aspect; each is run by the test suite
 test/              unit tests per module, end-to-end gateway test, SDK and hook tests,
                    adapter tests against the real packages, and a test that runs every policy in docs/policies.md
@@ -308,10 +311,11 @@ docs/              tutorials, usage (gateway), codex-recovery (live demo), appro
 
 ## Plan
 
-The design is three producers feeding one verifier. The SDK is the top of the funnel: cheap to install, wide reach, honest about being self-reported. The gateway is what a security or compliance owner mandates for consequential actions. The door turns the gateway around, in front of the business's own surface. All three exist; the work is widening each, and the door's next steps are detection signals with published error rates and standards-based passports (RFC 9421, AP2).
+The design is three producers feeding one verifier. The SDK is the top of the funnel: cheap to install, wide reach, honest about being self-reported. The gateway is what a security or compliance owner mandates for consequential actions. The door turns the gateway around, in front of the business's own surface. The egress witness receipts what goes around the gateway. All four exist; the work is widening each, and the door's next steps are detection signals with published error rates and standards-based passports (RFC 9421, AP2).
 
 **Done**
 
+- The egress witness: `agent-custody egress` is an HTTP forward proxy for a locked-down agent's connections that do not go to the gateway. It relays CONNECT and plain HTTP with no TLS interception. It identifies the agent only by a per-agent proxy credential it checks, lets the Cedar policy decide per `host:port`, commits each connection to the log before any byte moves, never dials an internal address for a host name, and receipts each connection, relayed or refused, as issuer kind `egress`, with the destination observed and the byte counts each way. `deploy/gateway/lockdown` gives the agent default-deny egress (a Kubernetes NetworkPolicy, an internal docker network). All three verifiers know the new kind, and ten conformance vectors pin it. It cannot see payloads, traffic when lockdown is off, or non-HTTP protocols ([the egress witness](docs/egress.md), [credential custody and lockdown](../../site/guide/credential-custody.md), tutorial 41).
 - An incident replay: `node examples/38-incident-replay.ts` plays a Claude Code session against the starter deny set in enforce mode. `terraform destroy` and `rm -rf ~` are denied before they run, and the denial receipts verify offline with the public key only. The site page [An incident replay](../../site/guide/incident-replay.md) shows the output and the limit: a credential in the agent's environment goes around the hook (tutorial 38).
 - One command for Claude Code (issue #204): `agent-custody init claude-code` makes the agent key, writes `sdk.json` in observe mode with no log, writes a starter deny policy, and merges the three hooks into `.claude/settings.local.json` or `~/.claude/settings.json` with absolute paths, safe to run two times. `agent-custody report` verifies the receipts and prints the calls the policy would have denied, with the reason, the rule, and the receipt id; removing the `mode` line enforces. The default local log takes a lock for each append, so hooks that run at the same time keep one log; `--log-url` needs `--log-key`; a second run keeps the pinned log key and warns about log flags it does not apply; `init` warns when git does not ignore the project settings file ([sdk.md](docs/sdk.md#claude-code), tutorial 36).
 - `agent-custody export`: copies the receipt bundles of a session into a directory for a pull request, byte for byte. It verifies each receipt against the issuer key, refuses one that carries plain arguments, results, or facts (unless `--allow-clear`), reads only `<id>.json` at the top level (never `salts/`, `outbox/`, or `*.authorization.json`), and keeps only the receipts issued at or after `--since`; [guide](docs/github-action.md), tutorial 39.

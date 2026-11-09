@@ -62,7 +62,7 @@ cd agent-custody && bun install && bun run demo
 
 The demo needs Node 22 and Bun. The [refund demo](site/advanced.md#the-refund-demo) shows the output step by step. For production payments, read [safe financial operations](packages/receipts/docs/financial-operations.md) (budgets, idempotency, and reconciliation with the provider), [human approvals](packages/receipts/docs/approvals.md) (one or two people approve the exact payment), and [completeness](packages/receipts/docs/completeness.md) (the provider's records matched against the receipts, so an action that went around the gateway shows up).
 
-The gateway covers only the calls that go through it. A credential in the agent's own environment goes around it. The [threat model](packages/receipts/docs/threat-model.md) lists the other limits.
+The gateway covers only the calls that go through it. A credential in the agent's own environment goes around it: [the egress witness](#calls-that-go-around-the-gateway-the-egress-witness) and lockdown close that route. The [threat model](packages/receipts/docs/threat-model.md) lists the other limits.
 
 ## Start with a coding agent
 
@@ -131,6 +131,37 @@ The hook stops a shell command, a file edit, or an MCP tool call that the agent 
 
 To cover more, keep production credentials out of the agent's environment, and put a gateway between the agent and the tools that touch production. The [threat model](packages/receipts/docs/threat-model.md) lists what each part defends, and what it does not. No independent witness runs yet, and the hosted log is not anchored on mainnet yet.
 
+## Calls that go around the gateway: the egress witness
+
+The gateway receipts the calls that go through it. An agent that holds a credential of its own, or can reach the internet directly, can call a provider around it. The egress witness closes that route. It is a forward proxy in the agent's network path, and lockdown makes it the agent's only way out other than the gateway.
+
+![The egress witness, animated: a locked-down agent pod reaches the outside only through the gateway or the witness. A direct call to Stripe is refused and receipted, a permitted host is relayed and receipted by bytes and times, a connection with no proxy credential is refused, and one that ignores the proxy is dropped by the network policy with no receipt.](site/public/egress-witness.svg)
+
+1. **Lockdown.** The agent's pod or container gets default-deny egress. It can reach only the gateway, the witness, and DNS.
+2. **Credential custody.** Tool credentials live only in the gateway. Calls that need a credential go there and are receipted as before.
+3. **The witness.** Everything else must go through `agent-custody egress`, set as the agent's `HTTPS_PROXY`:
+   - it identifies the agent by that agent's own proxy credential;
+   - a Cedar policy decides per destination (`host:port`);
+   - it commits the connection to the log before any byte moves;
+   - it relays or refuses the connection, and signs a receipt either way.
+
+| case | what happens | receipt |
+| --- | --- | --- |
+| a tool call through the gateway | the gateway decides it on its arguments | the gateway's, as before |
+| a direct call to a provider, such as `CONNECT api.stripe.com:443` | refused with 403; nothing is opened | `denied` |
+| a host the policy permits | relayed as an opaque tunnel | `executed`: destination, address, times, bytes each way |
+| no valid proxy credential | refused with 407, whatever the destination | `denied`, agent `unknown` |
+| an agent that ignores the proxy | dropped by the network policy | none: the witness never sees it |
+
+**What it cannot see.**
+- Payloads: there is no TLS interception, so a receipt records where traffic went, not what was sent.
+- Traffic when lockdown is off: an agent can simply ignore `HTTPS_PROXY`.
+- Protocols other than HTTP.
+
+Each receipt is an observed bypass, not a record of what was done. A permitted host name is never dialled at an internal address such as the cloud metadata service.
+
+**Where it runs.** The witness runs anywhere Node 22 runs. Lockdown depends on the platform: `deploy/gateway/lockdown` ships it for Kubernetes (a NetworkPolicy) and docker compose (an internal network). On a VM, bare metal, or a cloud task, build the same default-deny egress with that platform's firewall. [Credential custody and lockdown](site/guide/credential-custody.md) shows how. [The egress witness](packages/receipts/docs/egress.md) has the config, the policy, and the receipt. Tutorial 41 runs it end to end.
+
 ## Advanced
 
 The sections above are the two ways to start. The rest of the product is below and on the [advanced page](site/advanced.md): the gateway with grants and Cedar policy, the transparency log, the state package for agent memory, the hosted log, and the other frameworks and languages.
@@ -145,6 +176,7 @@ Each part exists because a specific thing goes wrong without it. Use the table t
 | **SDK interceptor** (`@agent-custody/receipts`, in the agent's process) | The only record of what an agent did is its own log: mutable, unsigned, written by the thing you are trying to check. | Any agent that calls tools. Turn it on first; it is a hook or a wrapped function. It is honest about being self-reported: every field is labelled `claimed`. |
 | **Gateway** (`@agent-custody/receipts`, a separate process between agent and tools: MCP servers, REST APIs described as tools, or other agents reached over A2A) | An in-process hook can be skipped, and a policy that reads the agent's own arguments can be fed lies. | The call moves money, touches production, or handles personal data, or a security owner has to sign off on what agents may do. Denied calls never reach the tool and still produce a receipt. For tools named in `precommit`, the gateway logs a signed authorization before forwarding and withholds the call if the log will not take it, so the evidence exists before the side effect does. Only calls through the gateway are covered; a credential in the agent's own environment bypasses it. |
 | **Door** (`agent-custody door`, a reverse proxy in front of your own website, API, or forms) | Visitors to your own site, browsers, API clients, crawlers, and agents, act on it with nothing signed to say who they were, what they presented, or why they were let in. | Agents or other automated clients reach your site or API, and you have to show what each one presented and what your policy decided. Each arrival is `verified` (a grant from a principal you trust), `claimed` (an assertion the door cannot check), or `unknown`; a Cedar policy per route decides; the door relays or refuses, and receipts the arrival either way. It can also record the pace of arrivals and send a person through Turnstile or hCaptcha. It does not yet detect agents in web traffic. |
+| **Egress witness** (`agent-custody egress`, a forward proxy, with egress lockdown in `deploy/gateway/lockdown`) | An agent with a credential of its own calls the provider directly, and the gateway never sees the call. | You need to show that agents did not go around the gateway, or to refuse it when they try. Under lockdown, the agent's network reaches only the gateway and the witness. The witness identifies the agent by its proxy credential, lets a Cedar policy decide per destination, and receipts each connection, relayed or refused. It records the destination and the byte counts, never the payload: there is no TLS interception. It sees nothing when lockdown is off, and it relays no protocol other than HTTP. Each receipt is an observed bypass, not a record of what was done. |
 | **Delegation grant and Cedar policy** (used by the gateway) | "The agent was allowed to do that" is a comment in a config file, not something a human signed. | Always with the gateway. The grant is signed by the principal and names agent, tools, and validity window; the policy decides on facts the gateway fetched itself, never on the agent's claims. |
 | **Transparency log** (local file, automatic) | A signed receipt can be deleted or replaced after the fact and nobody would know. | Always; every receipt is a leaf with an inclusion proof. Costs nothing to use. |
 | **Remote log** (`log` in the config, plus the `log` command or a hosted log) | The operator holds the local log file and can rewrite history in it. | A receipt will be shown to someone who does not trust the operator: an auditor, a counterparty, a customer, a regulator. The log's key, not yours, signs the tree heads. |
@@ -240,7 +272,7 @@ This whole loop is one runnable file, [packages/state/examples/02-receipt-to-bel
 - Prove a log was never rewritten: keep any receipt's tree head, later audit that the log still extends it. [verification.md](packages/receipts/docs/verification.md)
 - Run the console for a gateway: config, tools, receipts with a verdict each, a policy editor that replays recorded calls before it saves, and grant revocation, as a service of its own. [console.md](packages/receipts/docs/console.md).
 - Configure the gateway: who may use which tools, where the tools live, a worked example, and `agent-custody check` to validate a config before it starts. [configuration.md](packages/receipts/docs/configuration.md).
-- Run one shared gateway for every agent on a host or cluster: a container image for amd64 and arm64, compose, Kubernetes, and systemd recipes, a starter config. [deploy/gateway](deploy/gateway/README.md).
+- Run one shared gateway for every agent on a host or cluster: a container image for amd64 and arm64, compose, Kubernetes, and systemd recipes, a starter config, and egress lockdown manifests for the agents (`deploy/gateway/lockdown`, [credential custody and lockdown](site/guide/credential-custody.md)). [deploy/gateway](deploy/gateway/README.md).
 - See how it fits together, with diagrams: what runs on the customer's side, what is hosted, the sequence of a call, onboarding, revocation, and verification. [Architecture](site/guide/architecture.md).
 - Where each piece runs, sized, with what interception does not reach. [Deployment](https://agent-custody.dev/guide/deployment). What each release changed: [changelog](CHANGELOG.md).
 - Register a tenant on the hosted log at [app.agent-custody.dev](https://app.agent-custody.dev/#register) and get a log and a first key at once: free for ten thousand appends a month, [$50 a month](https://agent-custody.dev/pricing) for a million, a dashboard with usage against the plan, keys, and every action taken on the tenant, and an export that takes everything with you.
@@ -253,7 +285,7 @@ This whole loop is one runnable file, [packages/state/examples/02-receipt-to-bel
 
 | package | what it is | status |
 | --- | --- | --- |
-| [`@agent-custody/receipts`](packages/receipts/README.md) | Signed receipts for tool calls: an MCP gateway with Cedar or Rego policy (a file, or your OPA server) and a Merkle transparency log, an in-process SDK with framework adapters, [the door](packages/receipts/docs/door.md) in front of your own site or API, and an offline verifier, also as [a GitHub Action](packages/receipts/docs/github-action.md) on pull requests ([on the Marketplace](https://github.com/marketplace/actions/agent-custody-receipts)) | working, with runnable tutorials |
+| [`@agent-custody/receipts`](packages/receipts/README.md) | Signed receipts for tool calls: an MCP gateway with Cedar or Rego policy (a file, or your OPA server) and a Merkle transparency log, an in-process SDK with framework adapters, [the door](packages/receipts/docs/door.md) in front of your own site or API, [the egress witness](packages/receipts/docs/egress.md) for calls that go around the gateway, and an offline verifier, also as [a GitHub Action](packages/receipts/docs/github-action.md) on pull requests ([on the Marketplace](https://github.com/marketplace/actions/agent-custody-receipts)) | working, with runnable tutorials |
 | [`agent-custody` on PyPI](packages/python/README.md) | The Python client of the sidecar: `decide`, `record`, `wrap`, and adapters for LangChain, the OpenAI Agents SDK, the Claude Agent SDK, CrewAI, Google ADK, and a Hermes Agent plugin, tested against the real packages | working; Go, Java, and Rust clients live in [examples/languages](packages/receipts/examples/languages) |
 | [`@agent-custody/state`](packages/state/README.md) | Governed memory: a fact ledger where every write cites the receipt that caused it, carries valid time and transaction time, and can be superseded or rolled back | ledger on JSONL, SQLite, or Postgres, memory server behind the gateway or shared over HTTP, quarantine and verified provenance, blast radius, certified forget, retention and legal holds, write-through to Mem0 and Zep, eval CLI with signed reports |
 
