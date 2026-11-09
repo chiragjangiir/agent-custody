@@ -14,6 +14,8 @@
     "test": "bun run --filter '*' test",
     "demo": "bun run --cwd packages/receipts demo",
     "test:python": "bun run build && cd packages/python && uv run --extra test pytest -q",
+    "coverage": "bun run --cwd packages/receipts coverage && bun run --cwd packages/state coverage && bun run coverage:python && node .github/scripts/coverage-summary.mts",
+    "coverage:python": "bun run build && cd packages/python && uv run --extra test pytest -q --cov=agent_custody --cov-report=term --cov-report=json:coverage/coverage.json",
     "site:dev": "bun run --cwd site dev",
     "site:build": "bun run --cwd site build",
     "ci": "bun install --frozen-lockfile && bun run typecheck && bun run test && bun run site:build && bun run test:python"

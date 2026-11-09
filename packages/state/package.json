@@ -27,7 +27,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p ../receipts/tsconfig.build.json && tsc --noEmit",
-    "test": "tsc -p ../receipts/tsconfig.build.json && vitest run"
+    "test": "tsc -p ../receipts/tsconfig.build.json && vitest run",
+    "coverage": "tsc -p ../receipts/tsconfig.build.json && vitest run --coverage.enabled"
   },
   "engines": {
     "node": ">=22"
@@ -41,6 +42,7 @@
     "@electric-sql/pglite": "0.5.8",
     "@getzep/zep-cloud": "3.28.0",
     "@types/node": "26.4.1",
+    "@vitest/coverage-v8": "5.0.0",
     "mem0ai": "3.1.8",
     "typescript": "7.0.2",
     "vitest": "5.0.0"

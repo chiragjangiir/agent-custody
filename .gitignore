@@ -12,3 +12,7 @@ deploy/gateway/lockdown/agents/*.env
 # per-machine Claude Code settings; the committed .claude/settings.json is the repository hook
 .claude/settings.local.json
 .DS_Store
+
+# test coverage reports (bun run coverage)
+coverage/
+.coverage

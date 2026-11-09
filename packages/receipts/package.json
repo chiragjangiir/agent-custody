@@ -64,6 +64,7 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "coverage": "vitest run --coverage.enabled",
     "demo": "tsx scripts/demo.ts",
     "vectors": "tsx scripts/vectors.ts",
     "bench": "node scripts/hot-path-bench.ts"
@@ -83,6 +84,7 @@
     "@node-saml/node-saml": "5.1.0",
     "@openai/agents": "0.18.0",
     "@types/node": "26.4.1",
+    "@vitest/coverage-v8": "5.0.0",
     "ai": "7.0.93",
     "langchain": "1.5.15",
     "tsx": "4.23.13",

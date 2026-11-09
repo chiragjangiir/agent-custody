@@ -1,0 +1,41 @@
+# Checks that a pull request description follows .github/pull_request_template.md: every section is present and
+# none is left empty. The description is read from the event payload through an environment variable, never
+# interpolated into the script. Dependabot's pull requests pass without a description, so the check can be required.
+name: pr-template
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions: {}
+
+jobs:
+  pr-template:
+    runs-on: ubuntu-latest
+    steps:
+      - name: The description fills in every section of the template
+        env:
+          BODY: ${{ github.event.pull_request.body }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          set -euo pipefail
+          if [ "$AUTHOR" = "dependabot[bot]" ]; then
+            echo "A Dependabot pull request: no description required."
+            exit 0
+          fi
+          # drop HTML comments, so the template's own guidance does not count as an answer. The headings are matched in
+          # a file, not with grep -q at the end of a pipe, where an early exit would break the pipe on a long description.
+          body="$RUNNER_TEMP/pr-body.md"
+          printf '%s\n' "$BODY" | tr -d '\r' | perl -0pe 's/<!--.*?-->//gs' > "$body"
+          missing=0
+          for heading in "What and why" "How it was tested" "Checklist" "Notes for the reviewer"; do
+            section=$(awk -v h="## $heading" '$0==h{f=1;next} /^## /{f=0} f' "$body")
+            if ! grep -qxF "## $heading" "$body"; then
+              echo "::error::The description has no \"## $heading\" section. Use the pull request template."
+              missing=1
+            elif [ -z "$(printf '%s' "$section" | tr -d '[:space:]')" ]; then
+              echo "::error::The \"## $heading\" section is empty."
+              missing=1
+            fi
+          done
+          exit "$missing"

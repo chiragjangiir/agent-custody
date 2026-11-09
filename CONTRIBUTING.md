@@ -110,6 +110,12 @@ Web pages and the hosted log:
 - `packages/state/test/pgvector.test.ts` runs against the `pgvector/pgvector:pg16` image in Docker, and skips visibly when no daemon runs. PGlite 0.5.8 has no pgvector.
 - A test that runs a language client synchronously must not host the sidecar in-process, or the client hangs. A missing toolchain skips its language visibly.
 
+- `bun run coverage` runs the receipts and state tests with v8 coverage and the Python tests with `pytest-cov`, then prints a summary (`.github/scripts/coverage-summary.mts`). The HTML reports land in each package's `coverage/`. The `coverage` job in the test workflow runs the same command on every pull request and on main, writes the summary to the job summary, and uploads the reports as the `coverage` artifact. It is not a required check. Coverage counts only code that runs in the test process: a test that runs the CLI with `spawnSync` exercises `cli.ts` without coverage seeing it, and the site's tests exercise `packages/state/src/verify-web.ts`.
+
+## Pull requests
+
+- Every pull request uses `.github/pull_request_template.md`. The `pr-template` workflow fails while a section of the description is missing or empty. GitHub fills the template in when the pull request is opened in the browser; with `gh pr create`, copy its sections into `--body`.
+
 ## Deploy and images
 
 - A startup migration (the log, signer, and portal create or alter tables when they start) must be backward compatible for one release: add a column or a table, never drop or rename one in the release that stops using it. A rollback puts the previous image back on the new schema, and `upgrade.sh` does exactly that.

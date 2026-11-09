@@ -17,7 +17,7 @@ crewai = ["crewai>=1.0"]
 memory = ["mcp>=1.0"]
 verify = ["cryptography>=42"]
 adk = ["google-adk[a2a]>=2.0"]
-test = ["pytest>=8", "cryptography>=42", "langchain-core>=0.3", "openai-agents>=0.1", "crewai>=1.0", "mcp>=1.0", "google-adk[a2a]>=2.0"]
+test = ["pytest>=8", "cryptography>=42", "langchain-core>=0.3", "openai-agents>=0.1", "crewai>=1.0", "mcp>=1.0", "google-adk[a2a]>=2.0", "pytest-cov==6.0.0"]
 
 [build-system]
 requires = ["hatchling"]
