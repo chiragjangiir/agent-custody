@@ -35,7 +35,15 @@ export function psStamp(pid: number): string | undefined {
   } catch { /* unreadable */ }
   return undefined;
 }
-let own: { stamp: string | undefined } | undefined;
+let own: string | undefined;
+
+/**
+ * This process's stamp. It cannot change while the process runs, so it is read once: without /proc, a read runs `ps`,
+ * and the log lock records its owner on every append. A read that failed is tried again on the next call.
+ */
+export function ownProcessStamp(): string | undefined {
+  return own ??= processStamp(process.pid);
+}
 
 /**
  * Whether the process that created an operation may still run. A process that is gone is not alive. A live process
@@ -180,10 +188,11 @@ export class OperationStore {
       // Add with BigInt: individual minor-unit amounts are safe JS integers, but a sum need not be.
       const reserved = (this.db.prepare("SELECT amount FROM operations WHERE budget = ? AND period = ? AND status <> 'failed'").all(input.budget, period) as { amount: number }[]).reduce((sum, row) => sum + BigInt(row.amount), 0n);
       if (reserved + BigInt(input.amount) > BigInt(input.limit)) throw new Error(`operation budget ${input.budget} exceeded for ${period}`);
+      const ownerStart = ownProcessStamp();
       const operation: OperationRecord = {
         id: input.id,
         ownerPid: process.pid,
-        ...((own ??= { stamp: processStamp(process.pid) }).stamp !== undefined ? { ownerStart: own.stamp } : {}),
+        ...(ownerStart !== undefined ? { ownerStart } : {}),
         issuerKeyid: input.issuerKeyid,
         ...(input.providerDigest !== undefined ? { providerDigest: input.providerDigest } : {}),
         idempotencyKey: digestOf({ issuerKeyid: input.issuerKeyid, providerDigest: input.providerDigest ?? null, tool: input.tool, principal: input.principal, agent: input.agent, id: input.id }),

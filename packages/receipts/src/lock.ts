@@ -2,7 +2,7 @@
 import { randomUUID } from "node:crypto";
 import { closeSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
-import { ownerAlive, processStamp } from "./operations.ts";
+import { ownerAlive, ownProcessStamp } from "./operations.ts";
 
 /** A lock file that holds no readable owner is a lock that is being written. After this age it is a leftover. */
 const UNREADABLE_STALE_MS = 60_000;
@@ -73,7 +73,7 @@ function breakLock(lockFile: string, judged: { token: string | undefined; ino: n
  */
 export function takeLock(lockFile: string, staleMs: number): (() => void) | undefined {
   const token = randomUUID();
-  const body = JSON.stringify({ token, pid: process.pid, start: processStamp(process.pid), host: hostname() });
+  const body = JSON.stringify({ token, pid: process.pid, start: ownProcessStamp(), host: hostname() });
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       const fd = openSync(lockFile, "wx", 0o600);

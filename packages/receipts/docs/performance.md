@@ -48,9 +48,27 @@ What changed:
 
 Rego needed no change: a `.rego` file is compiled once per change, and the gateway passes the digest it computed when the file loaded.
 
+### The lock reads its owner stamp once
+
+On macOS most of a log append was the lock that keeps the processes writing one log in order. Its owner record carries the process's start time, so that a later process with the same PID is not taken for the owner. On Linux that comes from `/proc/<pid>/stat`. macOS has no `/proc`, so each append ran `ps`, about 1.1 ms. A process's start time cannot change while it runs, so it is now read once per process (`ownProcessStamp`), which the operation store already did. A read that failed is tried again on the next lock. The lock record is the same.
+
+The same machine and day, interleaved again, before and after this change alone (load average about 4 to 6):
+
+| step | before, mean | before, p50 | after, mean | after, p50 |
+| --- | --- | --- | --- | --- |
+| cedar evaluate | 86.3 | 82.2 | 63.0 | 57.3 |
+| receipt signature | 27.7 | 25.1 | 26.2 | 23.7 |
+| log append (all) | 1275.9 | 1219.6 | 160.4 | 137.8 |
+| of which Merkle | 9.4 | 8.5 | 8.3 | 7.4 |
+| tree-head signature | 23.0 | 21.5 | 19.7 | 18.3 |
+| rego evaluate (alternative) | 10.4 | 9.0 | 6.8 | 5.9 |
+| lock owner stamp (reference) | 1090.9 | 1050.4 | 1140.4 | 1086.3 |
+
+A second pair agreed: the log append went from a mean of 1350.9 µs to 159.9 µs. The reference row still times one read of the stamp, which a process now pays once. This change touches only the lock, so the lower Cedar and Rego numbers in the "after" runs are most likely the machine with one `ps` fewer per receipt, not anything in the evaluators. The site's gateway call (`scripts/bench.ts`) went from 2.1 ms to 0.7 ms.
+
 ## Where the rest of the time goes
 
-On macOS most of a log append is the lock that keeps the processes writing one log in order. Its owner record carries the process's start time, so that a later process with the same PID is not taken for the owner. On Linux that comes from `/proc/<pid>/stat`. macOS has no `/proc`, so each append runs `ps` (about 1.1 ms). A gateway on Linux does not pay this. This is not changed here.
+The rest of a log append, about 140 µs at the median, is the lock file itself (an exclusive create, the owner record written and read back, and a remove), reading what other writers appended, and the torn-tail check. A gateway on Linux never paid the `ps` cost.
 
 No decision is cached, only the parsed policy. Receipts are signed and appended before the call returns, never after: `authorize` never defers, strict mode defers nothing, and a financial operation's receipt does not defer (see the security invariants in `CONTRIBUTING.md`).
 
