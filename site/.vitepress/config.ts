@@ -98,7 +98,7 @@ export default withMermaid(
             { text: "Explain, review, packs", link: "/reference/state-tools" },
             { text: "Command line", link: "/reference/cli" },
           ] },
-          { text: "Guides", items: [{ text: "Getting started", link: "/guide/getting-started" }, { text: "Architecture", link: "/guide/architecture" }, { text: "Deployment", link: "/guide/deployment" }, { text: "Credential custody and lockdown", link: "/guide/credential-custody" }, { text: "Writing policies", link: "/receipts/policies" }, { text: "Writing egress policies", link: "/guide/egress-policies" }, { text: "Verifying a receipt", link: "/receipts/verification" }] },
+          { text: "Guides", items: [{ text: "Getting started", link: "/guide/getting-started" }, { text: "Put the door in front of a site", link: "/receipts/door-quickstart" }, { text: "Architecture", link: "/guide/architecture" }, { text: "Deployment", link: "/guide/deployment" }, { text: "Credential custody and lockdown", link: "/guide/credential-custody" }, { text: "Writing policies", link: "/receipts/policies" }, { text: "Writing egress policies", link: "/guide/egress-policies" }, { text: "Verifying a receipt", link: "/receipts/verification" }] },
         ],
         "/": [
         { text: "Start here", items: [

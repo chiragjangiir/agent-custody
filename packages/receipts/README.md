@@ -16,6 +16,7 @@ Anyone holding the public keys can verify a receipt offline. The agent is not tr
 
 - [Reference](https://docs.agent-custody.dev/reference/): every function, endpoint, MCP tool, and command with its request and response
 - [Tutorials](docs/tutorials.md): runnable examples, one per aspect of the code, all executed by the test suite
+- [Put the door in front of a site](docs/door-quickstart.md): a fifteen-minute quick start for a site owner, from keys to verified receipts.
 - [The door](docs/door.md): a receipted reverse proxy in front of your own site or API; what it knows about an arrival, how an arrival becomes a Cedar request, what the arrival gets back, and what it does not do yet
 - [The egress witness](docs/egress.md): a receipted forward proxy for calls that go around the gateway; lockdown, how the witness knows the agent, the Cedar request (or Rego input) per destination, the receipt, and what it cannot see: payloads, traffic when lockdown is off, and non-HTTP protocols
 - [Writing egress policies](../../site/guide/egress-policies.md): per-agent allow lists, wildcard hosts and the `*.example.com` trap, ports, IP literals, why a provider that needs a credential stays in the gateway, `forbid`, and rolling out from observe mode with `egress draft-policy`; every example is tested
