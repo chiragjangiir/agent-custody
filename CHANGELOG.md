@@ -4,6 +4,7 @@ All three packages, `@agent-custody/receipts`, `@agent-custody/state`, and `agen
 
 ## Unreleased
 
+- **The door's challenge, run once against Turnstile's test keys.** The tests stub `siteverify`. [docs/door.md](packages/receipts/docs/door.md) now records one manual run against Cloudflare's real `siteverify` with its public test keys: the always-passes secret gives `challenge.outcome: "passed"` and the request reaches the origin, and the always-fails secret gives `"failed"` with `invalid-input-response` and a 403. Both receipts verify. The page has the config, the commands, and the output.
 - **Review rules for Cursor Bugbot.** `.cursor/BUGBOT.md` tells the automatic pull request reviewer what this repository treats as a bug: fail-open paths, weakened security invariants, verifiers out of step, vectors regenerated without cause, secrets, network calls without a timeout or in tests, money as a float, unescaped portal output, and caches that can mix callers. It also lists the gaps to flag (no test, stale docs, no CHANGELOG entry) and what not to flag. `CONTRIBUTING.md` says to keep it in step.
 
 ## 0.16.2 — 2026-11-09
