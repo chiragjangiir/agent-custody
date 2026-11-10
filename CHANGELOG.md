@@ -4,6 +4,7 @@ All three packages, `@agent-custody/receipts`, `@agent-custody/state`, and `agen
 
 ## Unreleased
 
+- **Tests: the `verifyDeleted` fallbacks of the write-through stores** (#272). New tests in `packages/state` use plain fake clients, with no network. For Zep, Letta, LangGraph and Cognee, `verifyDeleted` returns false while the entry is still found (a Zep edge that cites the episode, a Letta passage with the same text, a LangGraph item that `get` or `search` returns, a Cognee item with the same fact id) and true once it is gone. A Mem0 or Zep put that gets no id back throws, and so does a Cognee add that the dataset does not list. The tests also cover the Zep and Letta listings when a page repeats an id or a cursor, the Cognee token variable and metadata parsing, and the pgvector dimensions check.
 - **Review rules for Cursor Bugbot.** `.cursor/BUGBOT.md` tells the automatic pull request reviewer what this repository treats as a bug: fail-open paths, weakened security invariants, verifiers out of step, vectors regenerated without cause, secrets, network calls without a timeout or in tests, money as a float, unescaped portal output, and caches that can mix callers. It also lists the gaps to flag (no test, stale docs, no CHANGELOG entry) and what not to flag. `CONTRIBUTING.md` says to keep it in step.
 
 ## 0.16.2 — 2026-11-09

@@ -15,7 +15,7 @@ import { Letta } from "@letta-ai/letta-client";
 import { InMemoryStore } from "@langchain/langgraph";
 import { Ledger, type Fact } from "../src/ledger.ts";
 import { createMemoryServer } from "../src/server.ts";
-import { cogneeStore, langgraphStore, lettaStore } from "../src/stores.ts";
+import { cogneeStore, langgraphStore, lettaStore, type LangGraphStoreLike, type LettaLike } from "../src/stores.ts";
 
 interface Seen { method: string; path: string; body: string; headers: Record<string, string | string[] | undefined> }
 function fake(routes: (req: Seen) => { status: number; body: unknown } | undefined): Promise<{ url: string; seen: Seen[]; close(): void; fail: { on: boolean } }> {
@@ -327,5 +327,90 @@ describe("Cognee, through its REST API", () => {
     } finally {
       cognee.fail.on = false;
     }
+  });
+});
+
+describe("verifyDeleted and listing edges, against plain fake clients", () => {
+  const entry = { externalId: "id-1", factId: "fact-1", text: "acct:1 plan: pro" };
+  const letta = (passages: Partial<LettaLike["agents"]["passages"]>): LettaLike => ({ agents: { passages: { create: async () => [], delete: async () => ({}), ...passages } } });
+
+  it("letta verifyDeleted is false while search returns the passage by id or by text, and true once it returns neither", async () => {
+    let results: { id: string; content: string }[] = [{ id: "id-1", content: "other" }];
+    const store = lettaStore(letta({ search: async () => ({ results }) }), { agentId: "a" });
+    expect(await store.verifyDeleted!(entry)).toBe(false);
+    results = [{ id: "id-9", content: entry.text }];
+    expect(await store.verifyDeleted!(entry)).toBe(false);
+    results = [{ id: "id-9", content: "other" }];
+    expect(await store.verifyDeleted!(entry)).toBe(true);
+  });
+
+  const custody = (id: string | undefined) => ({ ...(id ? { id } : {}), text: `t ${id}`, tags: ["agent-custody", `fact:f-${id}`] });
+  const lettaPages = (pages: ReturnType<typeof custody>[][]) => {
+    let i = 0;
+    return letta({ list: async () => pages[i++] ?? [] });
+  };
+
+  it("letta listing skips a passage without an id and a passage an earlier page returned", async () => {
+    const first = Array.from({ length: 100 }, (_, i) => custody(`p${i}`));
+    const listed = await lettaStore(lettaPages([first, [custody("p0"), custody(undefined), custody("q1")]]), { agentId: "a" }).list!();
+    expect(listed.map((e) => e.externalId)).toEqual([...first.map((p) => p.id), "q1"]);
+  });
+
+  it("letta listing throws when a full page ends on the cursor it was given", async () => {
+    const first = Array.from({ length: 100 }, (_, i) => custody(`p${i}`));
+    const second = [...Array.from({ length: 99 }, (_, i) => custody(`q${i}`)), custody("p99")];
+    await expect(lettaStore(lettaPages([first, second]), { agentId: "a" }).list!()).rejects.toThrow("letta: listing does not advance");
+  });
+
+  it("langgraph verifyDeleted is false while get or search finds the item, and true once neither does", async () => {
+    let item: Awaited<ReturnType<LangGraphStoreLike["get"]>> = { key: "id-1", value: {} };
+    let hits: Awaited<ReturnType<NonNullable<LangGraphStoreLike["search"]>>> = [];
+    const base = { put: async () => {}, get: async () => item, delete: async () => {} };
+    const store = langgraphStore({ ...base, search: async () => hits }, { namespace: ["m"] });
+    expect(await store.verifyDeleted!(entry)).toBe(false);
+    item = null;
+    hits = [{ key: "id-1", namespace: ["m"], value: {} }];
+    expect(await store.verifyDeleted!(entry)).toBe(false);
+    hits = [{ key: "id-2", namespace: ["m"], value: {} }];
+    expect(await store.verifyDeleted!(entry)).toBe(true);
+    expect(await langgraphStore(base, { namespace: ["m"] }).verifyDeleted!(entry)).toBe(true);
+  });
+
+  const cognee = (items: unknown[], env: Record<string, string | undefined> = {}, tokenEnv?: string) => {
+    const seen: RequestInit[] = [];
+    const fetch = (async (_url: URL, init: RequestInit) => {
+      seen.push(init);
+      return new Response(init.method === "GET" ? JSON.stringify(items) : "");
+    }) as typeof globalThis.fetch;
+    return { seen, store: cogneeStore({ url: "http://cognee.invalid", datasetId: "ds-1", fetch, env, ...(tokenEnv ? { tokenEnv } : {}) }) };
+  };
+
+  it("cognee verifyDeleted is false while the dataset lists an item with the fact id under another id, and true once it is gone", async () => {
+    const items = [{ id: "data-7", external_metadata: { source: "agent-custody", factId: "fact-1" } }];
+    const { store } = cognee(items);
+    expect(await store.verifyDeleted!(entry)).toBe(false);
+    items.length = 0;
+    expect(await store.verifyDeleted!(entry)).toBe(true);
+  });
+
+  it("cognee throws when the add succeeds but the dataset lists no item for the fact", async () => {
+    await expect(cognee([]).store.put(aFact(3))).rejects.toThrow("cognee accepted the add but the dataset lists no item carrying fact fact-3");
+  });
+
+  it("cognee sends the token variable as a bearer token, and throws when the variable is not set", async () => {
+    const { seen, store } = cognee([], { TEST_COGNEE_TOKEN: "tok-1" }, "TEST_COGNEE_TOKEN");
+    await store.list!();
+    expect((seen[0]!.headers as Record<string, string>).authorization).toBe("Bearer tok-1");
+    expect(() => cognee([], {}, "TEST_COGNEE_TOKEN")).toThrow("cognee: environment variable TEST_COGNEE_TOKEN is not set");
+  });
+
+  it("cognee reads metadata given as an object or as a JSON string, and skips metadata that is not JSON or absent", async () => {
+    const items = [
+      { id: "obj", external_metadata: { source: "agent-custody", factId: "fact-1", storedAt: "2026-01-01T00:00:00Z" } },
+      { id: "str", external_metadata: JSON.stringify({ source: "agent-custody", factId: "fact-2" }) },
+      { id: "bad", external_metadata: "{not json" },
+      { id: "none" },
+    ];
+    expect(await cognee(items).store.list!()).toEqual([{ externalId: "obj", factId: "fact-1", text: "", storedAt: "2026-01-01T00:00:00.000Z" }, { externalId: "str", factId: "fact-2", text: "" }]);
   });
 });
