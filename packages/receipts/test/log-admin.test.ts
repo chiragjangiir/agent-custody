@@ -237,6 +237,15 @@ describe("registrations", () => {
     const lines = (await csv.text()).trim().split("\n");
     expect(lines[0]).toBe("month,tenant,log_id,plan,email,name,company,role,phone,telegram,registered_at,billing,appends,quota,total_leaves,live_tokens,disabled");
     expect(lines.find((l) => l.includes(",buyer,"))).toMatch(new RegExp(`^${month},buyer,buyer-eu,team,ops@buyer.example,Ola Buyer,Buyer GmbH,CISO,\\+49 30 1234,olabuyer,\\d{4}-.*,active,3,1000000,3,1,false$`));
+    // the usage export is what is billed: a column out of place bills the wrong number
+    const usageCsv = await call("GET", `admin/usage.csv?month=${month}`);
+    expect(usageCsv.headers.get("content-type")).toBe("text/csv; charset=utf-8");
+    expect(usageCsv.headers.get("content-disposition")).toBe(`attachment; filename="agent-custody-usage-${month}.csv"`);
+    const usageLines = (await usageCsv.text()).trim().split("\n");
+    expect(usageLines[0]).toBe("month,tenant,log_id,plan,quota,appends,total_leaves,live_tokens,disabled");
+    expect(usageLines).toContain(`${month},buyer,buyer-eu,team,1000000,3,3,1,false`);
+    // in a quiet month appends and total_leaves differ, so each column is told apart from the other
+    expect(await (await call("GET", "admin/usage.csv?month=2020-01")).text()).toContain("2020-01,buyer,buyer-eu,team,1000000,0,3,1,false\n");
     expect([401, 429]).toContain((await call("GET", "admin/registrations", undefined, null)).status); // no token: refused, or throttled by the earlier wrong attempts from this address
     // the page carries the section and its numbers come from the same route
     const html = await (await call("GET", "admin")).text();
