@@ -5,6 +5,7 @@ All three packages, `@agent-custody/receipts`, `@agent-custody/state`, and `agen
 ## Unreleased
 
 - **Review rules for Cursor Bugbot.** `.cursor/BUGBOT.md` tells the automatic pull request reviewer what this repository treats as a bug: fail-open paths, weakened security invariants, verifiers out of step, vectors regenerated without cause, secrets, network calls without a timeout or in tests, money as a float, unescaped portal output, and caches that can mix callers. It also lists the gaps to flag (no test, stale docs, no CHANGELOG entry) and what not to flag. `CONTRIBUTING.md` says to keep it in step.
+- **Tests for the diagnostics of `agent-custody check`.** `test/check.test.ts` now asserts, by level and check name, each finding of `checkDoorConfig` and `checkConfig` that had no test: a config that is not JSON, a schema issue, the key file, the principal keys, the policy, observe mode, no routes, the credential variables of the log, the upstream token, A2A, and capture, the log keys, paths that cannot be written, the `revokedGrants` file, the grant, and the approvals and operations tool names under `--connect` (#268).
 
 ## 0.16.2 — 2026-11-09
 
