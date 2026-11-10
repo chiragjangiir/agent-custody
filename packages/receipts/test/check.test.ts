@@ -6,7 +6,8 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { checkConfig, type CheckFinding } from "../src/check.ts";
+import { checkConfig, checkEgressConfig, isEgressConfig, type CheckFinding } from "../src/check.ts";
+import { generateKeyPair, writeKeyPair } from "../src/crypto.ts";
 import { buildFixture } from "../scripts/fixture.ts";
 
 const cli = join(import.meta.dirname, "..", "src", "cli.ts");
@@ -18,6 +19,92 @@ const edit = (configFile: string, f: (c: Record<string, unknown>) => void) => {
 };
 const errors = (fs: CheckFinding[]) => fs.filter((f) => f.level === "error");
 const warns = (fs: CheckFinding[]) => fs.filter((f) => f.level === "warn");
+
+describe("agent-custody check on an egress witness config", () => {
+  const SECRET = "EGRESS_CHECK_TEST_SECRET";
+  const egress = (change: (c: Record<string, unknown>) => void = () => {}) => {
+    const dir = mkdtempSync(join(tmpdir(), "check-egress-"));
+    const { keyFile } = writeKeyPair(generateKeyPair(), dir, "egress");
+    writeFileSync(join(dir, "policy.cedar"), "permit(principal, action, resource);\n");
+    const c: Record<string, unknown> = { identity: { keyFile }, agents: [{ id: "research-agent", secretEnv: SECRET }], policyFile: "policy.cedar", receiptsDir: "receipts", logFile: "log.jsonl" };
+    change(c);
+    const configFile = join(dir, "egress.json");
+    writeFileSync(configFile, JSON.stringify(c));
+    return { dir, configFile };
+  };
+  const withSecret = <T>(value: string | undefined, f: () => T): T => {
+    const before = process.env[SECRET];
+    if (value === undefined) delete process.env[SECRET];
+    else process.env[SECRET] = value;
+    try {
+      return f();
+    } finally {
+      if (before === undefined) delete process.env[SECRET];
+      else process.env[SECRET] = before;
+    }
+  };
+  const find = (fs: CheckFinding[], check: string) => fs.filter((f) => f.check === check);
+
+  it("a mistyped key is an error naming the key it nearly is", () => {
+    const r = withSecret("s3cret", () => checkEgressConfig(egress((c) => { c.agnets = c.agents; }).configFile));
+    expect(errors(r).some((f) => f.check === "config" && f.message.includes('"agnets"') && f.message.includes('"agents"'))).toBe(true);
+  });
+
+  it("a witness key that loads is ok, and one that does not is an error", () => {
+    const good = egress();
+    expect(find(withSecret("s3cret", () => checkEgressConfig(good.configFile)), "key").map((f) => f.level)).toEqual(["ok"]);
+    writeFileSync(join(good.dir, "egress.key"), "not a key");
+    expect(find(withSecret("s3cret", () => checkEgressConfig(good.configFile)), "key").map((f) => f.level)).toEqual(["error"]);
+  });
+
+  it("an agent whose secret variable is unset is an error naming the variable, and a set one never shows its value", () => {
+    const { configFile } = egress();
+    const unset = find(withSecret(undefined, () => checkEgressConfig(configFile)), "credentials");
+    expect(unset.map((f) => f.level)).toEqual(["error"]);
+    expect(unset[0]!.message).toContain(SECRET);
+    const set = withSecret("value-that-must-not-leak", () => checkEgressConfig(configFile));
+    expect(find(set, "credentials").map((f) => f.level)).toEqual(["ok"]);
+    expect(JSON.stringify(set)).not.toContain("value-that-must-not-leak");
+  });
+
+  it("a Cedar policy that does not parse is an error, and a Rego policy is left to the witness to compile", () => {
+    const bad = egress();
+    writeFileSync(join(bad.dir, "policy.cedar"), "permit(principal");
+    expect(find(withSecret("s3cret", () => checkEgressConfig(bad.configFile)), "policy").map((f) => f.level)).toEqual(["error"]);
+    const rego = egress((c) => { c.policyFile = "policy.rego"; });
+    writeFileSync(join(rego.dir, "policy.rego"), "this is not rego");
+    const r = find(withSecret("s3cret", () => checkEgressConfig(rego.configFile)), "policy");
+    expect(r.map((f) => f.level)).toEqual(["ok"]);
+    expect(r[0]!.message).toContain("compiles a Rego policy when it starts");
+  });
+
+  it("both logFile and log, or neither, is a log error", () => {
+    const both = withSecret("s3cret", () => checkEgressConfig(egress((c) => { c.log = { url: "https://log.example" }; }).configFile));
+    expect(find(both, "log").map((f) => f.level)).toEqual(["error"]);
+    const neither = withSecret("s3cret", () => checkEgressConfig(egress((c) => { delete c.logFile; }).configFile));
+    expect(find(neither, "log").map((f) => f.level)).toEqual(["error"]);
+    expect(find(withSecret("s3cret", () => checkEgressConfig(egress().configFile)), "log").map((f) => f.level)).toEqual(["ok"]);
+  });
+
+  it("the command routes an egress config here and exits 0 with the secret set and 1 without it", () => {
+    const { configFile } = egress();
+    const env: NodeJS.ProcessEnv = { ...process.env, [SECRET]: "s3cret" };
+    const ok = spawnSync(process.execPath, ["--import", "tsx", cli, "check", "--config", configFile, "--json"], { encoding: "utf8", timeout: 30_000, env });
+    expect(ok.status).toBe(0);
+    expect((JSON.parse(ok.stdout) as CheckFinding[]).some((f) => f.level === "ok" && f.check === "credentials")).toBe(true);
+    delete env[SECRET];
+    const bad = spawnSync(process.execPath, ["--import", "tsx", cli, "check", "--config", configFile, "--json"], { encoding: "utf8", timeout: 30_000, env });
+    expect(bad.status).toBe(1);
+    expect((JSON.parse(bad.stdout) as CheckFinding[]).some((f) => f.level === "error" && f.check === "credentials" && f.message.includes(SECRET))).toBe(true);
+  });
+
+  it("a gateway config and a door config are not taken for an egress config", () => {
+    expect(isEgressConfig(egress().configFile)).toBe(true);
+    expect(isEgressConfig(fresh().configFile)).toBe(false);
+    const door = egress((c) => { delete c.agents; c.origin = { url: "http://127.0.0.1:1" }; c.trustedPrincipalKeys = []; });
+    expect(isEgressConfig(door.configFile)).toBe(false);
+  });
+});
 
 describe("agent-custody check", () => {
   it("a good config has no errors and says the upstreams are not started", async () => {

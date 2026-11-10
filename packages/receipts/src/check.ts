@@ -6,7 +6,7 @@ import * as cedar from "@cedar-policy/cedar-wasm/nodejs";
 import { accessSync, constants, existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, isAbsolute, join, resolve } from "node:path";
-import { DoorConfigSchema, GatewayConfigSchema, loadConfig, loadDoorConfig, strictRefusals, type GatewayConfig } from "./config.ts";
+import { DoorConfigSchema, EgressConfigSchema, GatewayConfigSchema, loadConfig, loadDoorConfig, loadEgressConfig, ONE_LOG, strictRefusals, type GatewayConfig } from "./config.ts";
 import { generateKeyPair, loadPrivateKey, loadPublicKey, writeKeyPair, type Envelope, type PublicKeyRef } from "./crypto.ts";
 import { delegationValidAt, verifyDelegation } from "./delegation.ts";
 import { hasPermitRule } from "./policy.ts";
@@ -180,6 +180,68 @@ export function checkDoorConfig(configPath: string): CheckFinding[] {
   if (cfg.logFile) {
     const ldir = writableAncestor(cfg.logFile);
     if (!ldir) add("error", "paths", `${cfg.logFile} cannot be written`);
+  }
+  return out;
+}
+
+/** True when the file is an egress witness config: it names agents, and no upstream or origin. */
+export function isEgressConfig(configPath: string): boolean {
+  try {
+    const raw = JSON.parse(readFileSync(configPath, "utf8")) as unknown;
+    return !!raw && typeof raw === "object" && !Array.isArray(raw) && "agents" in raw && !("upstream" in raw) && !("upstreams" in raw) && !("origin" in raw);
+  } catch {
+    return false;
+  }
+}
+
+/** `agent-custody check` on an egress witness config: what the witness would fail on at startup. */
+export function checkEgressConfig(configPath: string): CheckFinding[] {
+  const out: CheckFinding[] = [];
+  const add = (level: CheckFinding["level"], check: string, message: string) => out.push({ level, check, message });
+  let raw: unknown;
+  try {
+    raw = JSON.parse(readFileSync(configPath, "utf8"));
+  } catch (e) {
+    add("error", "config", `${configPath} is not readable JSON: ${e instanceof Error ? e.message : String(e)}`);
+    return out;
+  }
+  const known = Object.keys(EgressConfigSchema.shape);
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    for (const key of Object.keys(raw)) {
+      if (known.includes(key)) continue;
+      const near = known.find((k) => distance(k.toLowerCase(), key.toLowerCase()) <= 2);
+      add("error", "config", `unknown key "${key}" is ignored by the egress witness${near ? `; did you mean "${near}"?` : ""} A mistyped key leaves the setting it was meant for at its default`);
+    }
+  }
+  const parsed = EgressConfigSchema.safeParse(raw);
+  if (!parsed.success) {
+    for (const issue of parsed.error.issues) add("error", issue.message === ONE_LOG ? "log" : "config", `${issue.path.join(".") || "(root)"}: ${issue.message}`);
+    return out;
+  }
+  add("ok", "config", "the config parses");
+  const cfg = loadEgressConfig(configPath);
+  add("ok", "log", cfg.logFile ? `receipts are logged to ${cfg.logFile}` : `receipts are logged to ${cfg.log!.url}`);
+  if (!existsSync(cfg.identity.keyFile)) add("warn", "key", `${cfg.identity.keyFile} does not exist yet; \`agent-custody keygen\` creates it`);
+  else {
+    try {
+      loadPrivateKey(cfg.identity.keyFile);
+      add("ok", "key", `the witness key at ${cfg.identity.keyFile} loads`);
+      if (process.platform !== "win32" && (statSync(cfg.identity.keyFile).mode & 0o077) !== 0) add("warn", "key", `${cfg.identity.keyFile} is readable by other users; make it mode 0600`);
+    } catch (e) {
+      add("error", "key", `${cfg.identity.keyFile}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  const unset = cfg.agents.filter((a) => !process.env[a.secretEnv]);
+  for (const a of unset) add("error", "credentials", `agent ${a.id}: the secret variable ${a.secretEnv} is not set in this environment`);
+  if (!unset.length) add("ok", "credentials", cfg.agents.length === 1 ? "the agent's secret variable is set" : `the secret variables of all ${cfg.agents.length} agents are set`);
+  if (!existsSync(cfg.policyFile)) add("error", "policy", `${cfg.policyFile} does not exist`);
+  else if (isRegoFile(cfg.policyFile)) add("ok", "policy", `${cfg.policyFile} is not checked here: the witness compiles a Rego policy when it starts`);
+  else {
+    const text = readFileSync(cfg.policyFile, "utf8");
+    const r = cedar.checkParsePolicySet({ staticPolicies: text });
+    if (r.type !== "success") for (const e of r.errors) add("error", "policy", `${cfg.policyFile}: ${e.message}`);
+    else if (!hasPermitRule(text)) add("warn", "policy", `${cfg.policyFile} has no permit rule, so every connection is refused`);
+    else add("ok", "policy", "the policy parses");
   }
   return out;
 }

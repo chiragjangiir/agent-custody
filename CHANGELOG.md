@@ -4,6 +4,7 @@ All three packages, `@agent-custody/receipts`, `@agent-custody/state`, and `agen
 
 ## Unreleased
 
+- **`check` reads an egress witness config.** `agent-custody check --config egress.json` used to give an egress config the gateway's checks. `isEgressConfig` and `checkEgressConfig` in `check.ts` now report its unknown keys, whether the key loads, the secret variable of each agent (by name only), whether a Cedar policy parses, and that exactly one of `logFile` and `log` is set. An unset secret variable is an error, so the command exits 1. Gateway and door configs go where they went before.
 - **Review rules for Cursor Bugbot.** `.cursor/BUGBOT.md` tells the automatic pull request reviewer what this repository treats as a bug: fail-open paths, weakened security invariants, verifiers out of step, vectors regenerated without cause, secrets, network calls without a timeout or in tests, money as a float, unescaped portal output, and caches that can mix callers. It also lists the gaps to flag (no test, stale docs, no CHANGELOG entry) and what not to flag. `CONTRIBUTING.md` says to keep it in step.
 
 ## 0.16.2 — 2026-11-09
