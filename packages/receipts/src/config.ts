@@ -4,7 +4,8 @@ import { dirname, resolve } from "node:path";
 
 /** Where receipts are logged: a local file, or a log reached over HTTP whose bearer token comes from an environment variable. */
 const LogSchema = z.object({ url: z.string().url(), tokenEnv: z.string().min(1).optional(), /** send leaf hashes only; the log never holds the receipt. Use it for any log run by someone else */ hashOnly: z.boolean().optional(), /** milliseconds one append may take before the log counts as unreachable; default 10000 */ timeoutMs: z.number().int().positive().optional(), /** the log's public key files; every append's answer is checked against them before a call is forwarded. Without them the log's key document is fetched from the log itself on first use and pinned, which catches a log that turns dishonest later but not one dishonest from the start; required with precommit. */ keys: z.array(z.string().min(1)).optional(), /** the id the log must write into every tree head; an answer for another log is refused */ logId: z.string().min(1).optional() });
-const oneLog = { message: "exactly one of logFile or log is required" };
+export const ONE_LOG = "exactly one of logFile or log is required";
+const oneLog = { message: ONE_LOG };
 /** Optional OpenTelemetry export: every receipt also becomes a span at this OTLP/HTTP collector, after it is issued. Never on the evidence path. */
 const OtelSchema = z.object({ url: z.string().url(), headersEnv: z.record(z.string(), z.string().min(1)).optional(), serviceName: z.string().min(1).optional() });
 const SplunkSchema = z.object({ url: z.string().url(), tokenEnv: z.string().min(1), index: z.string().min(1).optional(), source: z.string().min(1).optional(), sourcetype: z.string().min(1).optional(), host: z.string().min(1).optional() });

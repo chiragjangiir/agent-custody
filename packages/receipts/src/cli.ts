@@ -34,7 +34,7 @@ import type { AdminOptions } from "./log-admin.ts";
 import { createRequire } from "node:module";
 import { pruneLog } from "./retention.ts";
 import { serveSidecar } from "./sidecar.ts";
-import { checkConfig, checkDoorConfig, formatFindings, isDoorConfig } from "./check.ts";
+import { checkConfig, checkDoorConfig, checkEgressConfig, formatFindings, isDoorConfig, isEgressConfig } from "./check.ts";
 import { serveConsole } from "./console.ts";
 import { TREEHEAD_TYPE, type AuthorizationBundle, type ReceiptBundle, type TreeHead, type ReceiptStatement } from "./receipt.ts";
 import { MerkleLog } from "./log.ts";
@@ -303,7 +303,7 @@ async function main(argv: string[]): Promise<number> {
     case "check": {
       const { values } = parseArgs({ args: rest, options: { config: { type: "string" }, connect: { type: "boolean", default: false }, json: { type: "boolean", default: false } } });
       if (!values.config) throw new Error("check needs --config");
-      const findings = isDoorConfig(values.config) ? checkDoorConfig(values.config) : await checkConfig(values.config, { connect: values.connect });
+      const findings = isDoorConfig(values.config) ? checkDoorConfig(values.config) : isEgressConfig(values.config) ? checkEgressConfig(values.config) : await checkConfig(values.config, { connect: values.connect });
       console.log(values.json ? JSON.stringify(findings, null, 2) : formatFindings(findings));
       return findings.some((f) => f.level === "error") ? 1 : 0;
     }
