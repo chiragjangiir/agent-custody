@@ -334,3 +334,28 @@ describe("the upstream alone", () => {
     expect(() => a2aUpstream("x", { url: "http://127.0.0.1:1", timeoutMs: 1000, prefix: "x", headerEnv: { authorization: "A2A_TEST_MISSING" } }, { env: {} })).toThrow(/A2A_TEST_MISSING is not set/);
   });
 });
+
+describe("the gateway as an A2A agent when the handler throws", () => {
+  it("answers 500 with a JSON-RPC error and logs the cause", async () => {
+    const agent = await fakeAgent("1.0");
+    const fx = fixtureFor(agent.url);
+    const cfg = loadConfig(fx.configFile);
+    const host = await createGatewayHost(cfg);
+    const logged: string[] = [];
+    const proxy = await serveA2a(host, (cfg.upstream as { a2a: Parameters<typeof serveA2a>[1] }).a2a, { port: 0, grant: JSON.parse(readFileSync(join(fx.dir, "grant.json"), "utf8")) as Envelope, log: (m) => logged.push(m) });
+    try {
+      // the served card is fetched again on each request, so a delegate that has gone away makes the handler throw
+      agent.server.closeAllConnections();
+      await new Promise((r) => agent.server.close(r));
+      const res = await fetch(`${proxy.url}${A2A_CARD_PATH}`);
+      expect(res.status).toBe(500);
+      const body = (await res.json()) as { jsonrpc: string; id: null; error: { code: number; message: string } };
+      expect(body).toMatchObject({ jsonrpc: "2.0", id: null, error: { code: -32603 } });
+      expect(body.error.message).not.toBe("");
+      expect(logged).toContain(`agent-custody gateway (a2a): ${body.error.message}`);
+    } finally {
+      await proxy.close();
+      await host.close();
+    }
+  });
+});

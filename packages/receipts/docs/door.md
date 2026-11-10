@@ -2,6 +2,8 @@
 
 The gateway stands between an agent and the tools it uses. The door stands between the world and your own HTTP surface: a website, an API, a form. Every arrival, a browser, an API client, a crawler, or an agent acting for someone, is classified by what it presented, decided by a Cedar policy for the route it hit, relayed to your origin or refused, and receipted either way. The receipt is the same signed, logged, independently verifiable receipt the gateway issues, with `issuer.kind: "door"`.
 
+New to the door? [Put the door in front of a site](door-quickstart.md) walks through one form in about fifteen minutes.
+
 This is the first piece of the agent front door. It answers "what may this arrival do here" and "what did it do, provably". It does not yet answer "is this an agent" for web traffic: that is detection, and the door records only what it can check. Read [what the door knows](#what-the-door-knows-about-an-arrival) before writing a policy.
 
 ```bash
@@ -83,6 +85,173 @@ when { context.facts.arrival.challenge.outcome == "passed" };
 and a refused arrival that has not passed is told how in the 403 body: `challenge: { provider, siteKey, header }`, so a page can render the widget and try again.
 
 **A token serves one request.** Turnstile and hCaptcha refuse a token they have seen (`timeout-or-duplicate`, `already-seen-response`), and the door keeps no pass between requests: it does not set a cookie or remember an address. So the page must take a new token for every request it sends to a challenged route, and for every retry: call `turnstile.reset()` or `hcaptcha.reset()` after each request, and wait for the new token before the next. The door checks the token before it reads the body, so a request refused for its size (413), its path (400), or by the policy has used its token too. A second request that sends the same token is `failed`, and the person sees another 403. The outcome is a signal, not a class: a `verified` agent that also passes a challenge is still the agent its grant names, and an `unknown` arrival that passes is still `unknown`, with `challenge.outcome: "passed"` beside it. What the provider's pass means, and what it does not, is in [door signals](door-signals.md). Passkeys are not a provider here: a passkey proves possession of a credential the site registered, which is a login, not a challenge, and belongs to the origin.
+
+### A run against Turnstile's test keys
+
+The tests stub `siteverify`. This run calls the real one once. Cloudflare publishes [test keys](https://developers.cloudflare.com/turnstile/troubleshooting/testing/) that need no account: the site key `1x00000000000000000000AA`, the secret `1x0000000000000000000000000000000AA` (validation always succeeds), the secret `2x0000000000000000000000000000000AA` (validation always fails), and the dummy token `XXXX.DUMMY.TOKEN.XXXX`. The test secrets accept only the dummy token. Cloudflare answers a test key with the hostname `example.com`, so the config names that hostname. These secrets are public. A real secret still goes only into the environment, never into the config or a flag.
+
+The run used the CLI from this repository on 2026-11-10. `policy.cedar`:
+
+```cedar
+// The form is for an arrival that has passed the challenge.
+permit(principal, action == Action::"form", resource)
+when { context.facts.arrival.challenge.outcome == "passed" };
+```
+
+`door.json`:
+
+```json
+{
+  "identity": { "keyFile": "keys/door.key" },
+  "origin": { "url": "http://127.0.0.1:3000" },
+  "routes": [{ "name": "form", "methods": ["POST"], "path": "/form" }],
+  "policyFile": "policy.cedar",
+  "receiptsDir": "receipts",
+  "logFile": "log.jsonl",
+  "challenge": {
+    "provider": "turnstile",
+    "siteKey": "1x00000000000000000000AA",
+    "secretEnv": "TURNSTILE_SECRET",
+    "hostnames": ["example.com"]
+  }
+}
+```
+
+A stand-in origin answers every request with `{"ok":true}`:
+
+```bash
+agent-custody keygen --dir keys --name door
+node -e 'require("http").createServer((q,s)=>{s.setHeader("content-type","application/json");s.end(JSON.stringify({ok:true}))}).listen(3000,"127.0.0.1")' &
+```
+
+**The pass run.** Start the door with the secret that always succeeds, and send the dummy token:
+
+```bash
+TURNSTILE_SECRET=1x0000000000000000000000000000000AA agent-custody door --config door.json --port 8780 &
+curl -sS -i -X POST http://127.0.0.1:8780/form -H 'content-type: application/json' \
+  -H 'x-agent-custody-challenge: XXXX.DUMMY.TOKEN.XXXX' -d '{"name":"test"}'
+```
+
+```text
+HTTP/1.1 200 OK
+x-agent-custody-receipt: 74c1e645-3b3e-4306-a70c-057ea0e61d41
+content-type: application/json
+date: Tue, 10 Nov 2026 02:24:05 GMT
+x-agent-custody-class: unknown
+Connection: keep-alive
+Keep-Alive: timeout=5
+Transfer-Encoding: chunked
+
+{"ok":true}
+```
+
+**The fail run.** Stop the door. Start it again with the secret that always fails, and send the same request:
+
+```bash
+TURNSTILE_SECRET=2x0000000000000000000000000000000AA agent-custody door --config door.json --port 8780 &
+curl -sS -i -X POST http://127.0.0.1:8780/form -H 'content-type: application/json' \
+  -H 'x-agent-custody-challenge: XXXX.DUMMY.TOKEN.XXXX' -d '{"name":"test"}'
+```
+
+```text
+HTTP/1.1 403 Forbidden
+x-agent-custody-receipt: 01b840df-6a79-408a-9d3b-32dac88787d8
+content-type: application/json
+cache-control: no-store
+x-agent-custody-class: unknown
+Date: Tue, 10 Nov 2026 02:24:13 GMT
+Connection: keep-alive
+Keep-Alive: timeout=5
+Transfer-Encoding: chunked
+
+{"error":"refused by the door's policy","reason":"no permit policy matched","receipt":"01b840df-6a79-408a-9d3b-32dac88787d8","challenge":{"provider":"turnstile","siteKey":"1x00000000000000000000AA","header":"x-agent-custody-challenge"}}
+```
+
+**Verify both receipts.** Both exit 0:
+
+```bash
+agent-custody verify receipts/74c1e645-3b3e-4306-a70c-057ea0e61d41.json --issuer-key keys/door.pub --log log.jsonl
+```
+
+```text
+PASS  receipt signature (issuer key)  (keyid e316d40ebc50)
+PASS  receipt payload type
+PASS  structural parts in clear
+PASS  issuer kind is known  (door / http)
+PASS  issuer keyid matches signer
+PASS  door receipt carries a policy decision
+PASS  principal is claimed, not attested  (no signed delegation in this receipt)
+PASS  request args digest  (committed, not recomputed: 1 value(s) withheld; disclose them to recompute)
+PASS  execution result digest
+PASS  withheld facts.arrival.resultDigest  (committed, not recomputed: 1 value(s) withheld; disclose them to recompute)
+PASS  policy decision consistent with execution  (allow -> executed)
+PASS  no policy errors on an allow
+PASS  authorization signature (issuer key)  (keyid e316d40ebc50)
+PASS  authorization names this call  (form for receipt 74c1e645-3b3)
+PASS  authorization tree head signature  (keyid e316d40ebc50)
+PASS  authorization log inclusion proof  (leaf 0 of 1)
+PASS  authorization logged before execution  (authorization leaf 0, receipt leaf 1)
+PASS  tree head signature  (issuer key e316d40ebc50)
+PASS  tree head matches inclusion proof size
+PASS  log inclusion proof  (leaf 1 of 2, root 67f4115b31c2)
+PASS  log file root matches tree head  (recomputed 67f4115b31c2)
+
+RESULT: VERIFIED
+
+ISSUER: door (http), unknown issuer kind
+
+field           provenance  value
+principal       claimed     (none)
+agent           claimed     unknown
+model           claimed     (none supplied)
+tool            observed    form
+args            claimed     {"$rest":{"$custody":"withheld","sha256":"8f41daf2…"},"bodyBytes":15,"headers":{"accept":"*/*","content-type":"application/json","host":"127.0.0.1:8780","user-agent":"curl/8.7.1"},"method":"POST","path":"/form"}
+fact.arrival    observed    {"challenge":{"outcome":"passed","provider":"turnstile"},"class":"unknown","grant":"absent","method":"POST","path":"/form","rate":{"burst":1,"by":"remote","minute":1},"remote":"127.0.0.1","route":"form","signature":false,"subject":"unknown"}
+policy          observed    allow [policy0] policy 71e3eefa3599
+authorization   observed    committed to the log as leaf 0, before the call was forwarded
+execution       observed    executed
+```
+
+```bash
+agent-custody verify receipts/01b840df-6a79-408a-9d3b-32dac88787d8.json --issuer-key keys/door.pub --log log.jsonl
+```
+
+```text
+PASS  receipt signature (issuer key)  (keyid e316d40ebc50)
+PASS  receipt payload type
+PASS  structural parts in clear
+PASS  issuer kind is known  (door / http)
+PASS  issuer keyid matches signer
+PASS  door receipt carries a policy decision
+PASS  principal is claimed, not attested  (no signed delegation in this receipt)
+PASS  request args digest  (committed, not recomputed: 1 value(s) withheld; disclose them to recompute)
+PASS  withheld facts.arrival.resultDigest  (committed, not recomputed: 1 value(s) withheld; disclose them to recompute)
+PASS  withheld execution.reason  (committed, not recomputed: 1 value(s) withheld; disclose them to recompute)
+PASS  policy decision consistent with execution  (deny -> denied)
+PASS  no policy errors on an allow
+PASS  tree head signature  (issuer key e316d40ebc50)
+PASS  tree head matches inclusion proof size
+PASS  log inclusion proof  (leaf 2 of 3, root 54a065656fa2)
+PASS  log file root matches tree head  (recomputed 54a065656fa2)
+
+RESULT: VERIFIED
+
+ISSUER: door (http), unknown issuer kind
+
+field           provenance  value
+principal       claimed     (none)
+agent           claimed     unknown
+model           claimed     (none supplied)
+tool            observed    form
+args            claimed     {"$rest":{"$custody":"withheld","sha256":"255b518c…"},"bodyBytes":15,"headers":{"accept":"*/*","content-type":"application/json","host":"127.0.0.1:8780","user-agent":"curl/8.7.1"},"method":"POST","path":"/form"}
+fact.arrival    observed    {"challenge":{"error":"invalid-input-response","outcome":"failed","provider":"turnstile"},"class":"unknown","grant":"absent","method":"POST","path":"/form","rate":{"burst":1,"by":"remote","minute":1},"remote":"127.0.0.1","route":"form","signature":false,"subject":"unknown"}
+policy          observed    deny [] policy 71e3eefa3599
+execution       observed    denied: (reason withheld under the capture rule)
+```
+
+The pass run's receipt records `challenge.outcome: "passed"`, and the door relayed the request. The fail run's receipt records `challenge.outcome: "failed"` with Cloudflare's code `invalid-input-response`, and the policy refused the request. The token does not appear in either receipt.
+
+**What this run shows, and what it does not.** Test keys prove the wire path, not bot detection. The door reaches the real `siteverify`, sends the secret and the token, and records the answer. A test secret gives a fixed answer and no widget runs, so the run says nothing about how well Turnstile tells a person from a bot. The run did not exercise the `unavailable` outcome, a hostname mismatch, an action mismatch, the `timeout-or-duplicate` code, or `remoteip` (the config sets no `trustProxy`, so the door sent none). `test/door.test.ts` covers those against a stubbed `siteverify`. In the output above, the two `sha256` digests are shortened to eight characters and `…`. Nothing else is changed. The CLI was `agent-custody` 0.16.2, run from this repository at commit `64285ef`. That version had no note for door receipts, so its `ISSUER` lines end with `unknown issuer kind`; later versions say what a door receipt proves there: the arriving party could not forge it and is attested only when it presented a grant, and a request that reached the origin some other way leaves no receipt.
 
 ## How an arrival becomes a Cedar request
 

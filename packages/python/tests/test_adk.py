@@ -2,6 +2,7 @@
 # skips a denied tool and the model sees the receipt id; an allowed tool runs and is recorded once; every receipt
 # passes the TypeScript verifier.
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 from google.adk.agents import LlmAgent
@@ -11,6 +12,7 @@ from google.adk.runners import InMemoryRunner
 from google.adk.tools.base_tool import BaseTool
 from google.genai import types
 
+from agent_custody import Client, SidecarError
 from agent_custody.adk import RECEIPT_KEY, adk_callbacks
 from conftest import receipt_count, verify
 
@@ -106,3 +108,68 @@ def test_allowed_tool_runs_and_is_recorded_once(sidecar, client):
 
 def test_callbacks_are_the_two_llm_agent_fields():
     assert set(adk_callbacks(None)) == {"before_tool_callback", "after_tool_callback"}
+
+
+def test_a_denial_that_cannot_be_recorded_still_skips_the_tool(client, monkeypatch):
+    def refuse(*a, **k):
+        raise SidecarError("sidecar record: 503")
+
+    monkeypatch.setattr(client, "record", refuse)
+    out = adk_callbacks(client)["before_tool_callback"](SimpleNamespace(name="stripe.refund"), {"amount": 999999}, SimpleNamespace())
+    assert out == {"error": "agent-custody: no permit policy matched (no receipt: the sidecar refused the request)", RECEIPT_KEY: None}
+
+
+def test_a_response_that_is_not_json_is_recorded_as_text(client, recorded):
+    class Answer:
+        def __str__(self):
+            return "Dana"
+
+    ctx = SimpleNamespace(invocation_id="inv-1", function_call_id="fc-1")
+    assert adk_callbacks(client)["after_tool_callback"](SimpleNamespace(name="customer.lookup"), {"id": "c1"}, ctx, Answer()) is None
+    assert recorded[0]["execution"]["result"] == "Dana"
+
+
+# A before_tool_callback that raises ends the whole ADK run, and one that returns None lets the tool run. So a sidecar
+# that cannot answer, or answers something that is neither a decision nor "no policy", must come back as the error
+# dict: the tool is skipped, the model is told why, and the run goes on. Driven through ADK's own runner.
+def test_an_unreachable_sidecar_skips_the_tool_and_the_run_goes_on():
+    calls = []
+    agent = LlmAgent(name="billing", model=Scripted(), tools=[RefundTool(calls)], **adk_callbacks(Client("http://127.0.0.1:9/", timeout=2)))
+    events = run(agent, "refund 2500")
+    assert calls == []
+    (response,) = function_responses(events)
+    assert response["error"] == "agent-custody: the policy could not be evaluated; no receipt: the sidecar could not be reached"
+    assert response[RECEIPT_KEY] is None
+
+
+@pytest.mark.parametrize("answer", [{}, {"decision": "maybe"}, {"verdict": "allow"}, [], "allow"])
+def test_an_answer_without_allow_or_deny_skips_the_tool(client, monkeypatch, answer):
+    monkeypatch.setattr(client, "decide", lambda *a, **k: answer)
+    calls = []
+    agent = LlmAgent(name="billing", model=Scripted(), tools=[RefundTool(calls)], **adk_callbacks(client))
+    events = run(agent, "refund 2500")
+    assert calls == []
+    (response,) = function_responses(events)
+    assert response["error"] == "agent-custody: the policy could not be evaluated; no receipt: the sidecar's answer was malformed"
+
+
+@pytest.mark.parametrize("answer", [{"decision": "deny"}, {"decision": "deny", "reasons": None, "errors": None}, {"decision": "deny", "reasons": 7}])
+def test_a_deny_without_reasons_or_errors_still_skips_the_tool(client, monkeypatch, answer):
+    monkeypatch.setattr(client, "decide", lambda *a, **k: answer)
+    out = adk_callbacks(client)["before_tool_callback"](SimpleNamespace(name="stripe.refund"), {"amount": 999999}, SimpleNamespace())
+    assert out["error"].startswith("agent-custody: ") and RECEIPT_KEY in out
+
+
+def test_no_policy_lets_the_tool_run(client, monkeypatch):
+    monkeypatch.setattr(client, "decide", lambda *a, **k: None)  # what /decide answers when the sidecar has no policy
+    assert adk_callbacks(client)["before_tool_callback"](SimpleNamespace(name="customer.lookup"), {"id": "c1"}, SimpleNamespace()) is None
+
+
+def test_credentials_in_the_sidecar_url_never_reach_the_model():
+    calls = []
+    agent = LlmAgent(name="billing", model=Scripted(), tools=[RefundTool(calls)], **adk_callbacks(Client("http://user:pass@127.0.0.1:9/?token=abc", timeout=2)))
+    events = run(agent, "refund 2500")
+    assert calls == []
+    (response,) = function_responses(events)
+    for secret in ("user", "pass", "token", "abc", "127.0.0.1"):
+        assert secret not in response["error"] and secret not in final_text(events)

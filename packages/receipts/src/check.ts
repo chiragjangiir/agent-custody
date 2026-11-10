@@ -6,7 +6,7 @@ import * as cedar from "@cedar-policy/cedar-wasm/nodejs";
 import { accessSync, constants, existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, isAbsolute, join, resolve } from "node:path";
-import { DoorConfigSchema, GatewayConfigSchema, loadConfig, loadDoorConfig, strictRefusals, type GatewayConfig } from "./config.ts";
+import { DoorConfigSchema, EgressConfigSchema, GatewayConfigSchema, loadConfig, loadDoorConfig, loadEgressConfig, ONE_LOG, strictRefusals, type GatewayConfig } from "./config.ts";
 import { generateKeyPair, loadPrivateKey, loadPublicKey, writeKeyPair, type Envelope, type PublicKeyRef } from "./crypto.ts";
 import { delegationValidAt, verifyDelegation } from "./delegation.ts";
 import { hasPermitRule } from "./policy.ts";
@@ -56,7 +56,8 @@ function writableAncestor(path: string): string | null {
     dir = up;
   }
   try {
-    if (!statSync(dir).isDirectory()) return null;
+    // the path itself may be a file; anything above it must be a directory
+    if (dir !== resolve(path) && !statSync(dir).isDirectory()) return null;
     accessSync(dir, constants.W_OK);
     return dir;
   } catch {
@@ -182,6 +183,76 @@ export function checkDoorConfig(configPath: string): CheckFinding[] {
     const ldir = writableAncestor(cfg.logFile);
     if (!ldir) add("error", "paths", `${cfg.logFile} cannot be written`);
   }
+  return out;
+}
+
+/** True when the file is an egress witness config: it names agents, and no upstream or origin. */
+export function isEgressConfig(configPath: string): boolean {
+  try {
+    const raw = JSON.parse(readFileSync(configPath, "utf8")) as unknown;
+    return !!raw && typeof raw === "object" && !Array.isArray(raw) && "agents" in raw && !("upstream" in raw) && !("upstreams" in raw) && !("origin" in raw);
+  } catch {
+    return false;
+  }
+}
+
+/** `agent-custody check` on an egress witness config: what the witness would fail on at startup. */
+export function checkEgressConfig(configPath: string): CheckFinding[] {
+  const out: CheckFinding[] = [];
+  const add = (level: CheckFinding["level"], check: string, message: string) => out.push({ level, check, message });
+  let raw: unknown;
+  try {
+    raw = JSON.parse(readFileSync(configPath, "utf8"));
+  } catch (e) {
+    add("error", "config", `${configPath} is not readable JSON: ${e instanceof Error ? e.message : String(e)}`);
+    return out;
+  }
+  const known = Object.keys(EgressConfigSchema.shape);
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    for (const key of Object.keys(raw)) {
+      if (known.includes(key)) continue;
+      const near = known.find((k) => distance(k.toLowerCase(), key.toLowerCase()) <= 2);
+      add("error", "config", `unknown key "${key}" is ignored by the egress witness${near ? `; did you mean "${near}"?` : ""} A mistyped key leaves the setting it was meant for at its default`);
+    }
+  }
+  const parsed = EgressConfigSchema.safeParse(raw);
+  if (!parsed.success) {
+    for (const issue of parsed.error.issues) add("error", issue.message === ONE_LOG ? "log" : "config", `${issue.path.join(".") || "(root)"}: ${issue.message}`);
+    return out;
+  }
+  add("ok", "config", "the config parses");
+  const cfg = loadEgressConfig(configPath);
+  add("ok", "log", cfg.logFile ? `receipts are logged to ${cfg.logFile}` : `receipts are logged to ${cfg.log!.url}`);
+  if (!existsSync(cfg.identity.keyFile)) add("error", "key", `${cfg.identity.keyFile} does not exist, and the witness does not start without it; \`agent-custody keygen\` creates it, and the container creates it at EGRESS_KEY before it starts the witness`);
+  else {
+    try {
+      loadPrivateKey(cfg.identity.keyFile);
+      add("ok", "key", `the witness key at ${cfg.identity.keyFile} loads`);
+      if (process.platform !== "win32" && (statSync(cfg.identity.keyFile).mode & 0o077) !== 0) add("warn", "key", `${cfg.identity.keyFile} is readable by other users; make it mode 0600`);
+    } catch (e) {
+      add("error", "key", `${cfg.identity.keyFile}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  const unset = cfg.agents.filter((a) => !process.env[a.secretEnv]);
+  for (const a of unset) add("error", "credentials", `agent ${a.id}: the secret variable ${a.secretEnv} is not set in this environment`);
+  if (!unset.length) add("ok", "credentials", cfg.agents.length === 1 ? "the agent's secret variable is set" : `the secret variables of all ${cfg.agents.length} agents are set`);
+  if (!existsSync(cfg.policyFile)) add("error", "policy", `${cfg.policyFile} does not exist`);
+  else if (isRegoFile(cfg.policyFile)) {
+    const errors = compileRego(readFileSync(cfg.policyFile, "utf8")).errors;
+    for (const e of errors) add("error", "policy", `${cfg.policyFile}: ${e}`);
+    if (!errors.length) add("ok", "policy", "the Rego policy compiles");
+  } else {
+    const text = readFileSync(cfg.policyFile, "utf8");
+    const r = cedar.checkParsePolicySet({ staticPolicies: text });
+    if (r.type !== "success") for (const e of r.errors) add("error", "policy", `${cfg.policyFile}: ${e.message}`);
+    else if (!hasPermitRule(text)) add("warn", "policy", `${cfg.policyFile} has no permit rule, so every connection is refused`);
+    else add("ok", "policy", "the policy parses");
+  }
+  if (cfg.mode === "observe") add("warn", "mode", "observe mode relays every connection from a known agent and records what the policy would have decided; nothing is refused by policy");
+  if (cfg.log?.tokenEnv && !process.env[cfg.log.tokenEnv]) add("error", "credentials", `log token variable ${cfg.log.tokenEnv} is not set in this environment`);
+  if (cfg.splunk?.tokenEnv && !process.env[cfg.splunk.tokenEnv]) add("error", "credentials", `splunk token variable ${cfg.splunk.tokenEnv} is not set in this environment`);
+  for (const v of Object.values(cfg.otel?.headersEnv ?? {})) if (!process.env[v]) add("error", "credentials", `otel header variable ${v} is not set in this environment`);
+  for (const f of cfg.log?.keys ?? []) if (!existsSync(f)) add("error", "log keys", `${f} does not exist`);
   return out;
 }
 

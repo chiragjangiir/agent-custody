@@ -120,6 +120,8 @@ A rule with no annotation gives its id in place of the reason: `agent-custody de
 
 The receipt does not change. It keeps the policy ids and the policy digest, and its `execution.reason` stays the list of ids. The reason text is for the agent and for the person who reads the session. The other adapters in this file still return the rule ids.
 
+When the denial receipt cannot be issued, the call is blocked all the same, and the reason ends with `(no receipt: <why>)` in place of the receipt id. `<why>` names the kind of failure and nothing more. In TypeScript it is `the receipt could not be recorded`. In Python it is `the sidecar could not be reached`, `the sidecar answered HTTP <status>`, `the sidecar refused the request`, `the sidecar's answer was malformed`, or `an unexpected <exception type>`. The reason goes into the model's context, and the error behind it can carry a log or sidecar URL with credentials in it, or the text of an upstream answer. So the error itself goes to stderr in TypeScript and to the `agent_custody` logger at `WARNING` in Python, never into the reason, and the URL in it is shown without its user, password, or query string. Every adapter that answers a deny with text works this way: Claude Code, the Claude Agent SDK and OpenAI Agents in both languages, OpenClaw, DeepSeek Harness, Hermes, Google ADK, and CrewAI. OpenAI Agents in both languages and CrewAI used to raise the error when the denial receipt failed; they now return the denial text, as the others do, and the tool still does not run. The Vercel AI `wrapTools` and `issuer.wrap` throw `PolicyDeniedError`, which needs a receipt id, so there a failed denial receipt still rejects with the log's error.
+
 ### The report
 
 ```bash

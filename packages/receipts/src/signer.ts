@@ -59,24 +59,25 @@ export interface RemoteSignerOptions {
 export async function connectSigner(url: string, opts: RemoteSignerOptions = {}): Promise<Signer> {
   const f = opts.fetch ?? fetch;
   const base = url.endsWith("/") ? url : `${url}/`;
+  const shown = shownUrl(url);
   const headers = { "content-type": "application/json", ...(opts.token ? { authorization: `Bearer ${opts.token}` } : {}) };
   const res = await f(new URL("keys", base), { headers, signal: AbortSignal.timeout(10_000) });
-  if (!res.ok) throw new Error(`signer ${url} refused the key request: ${res.status}`);
+  if (!res.ok) throw new Error(`signer ${shown} refused the key request: ${res.status}`);
   const doc = (await res.json()) as KeyDocument;
   const current = doc.keys[0];
-  if (!current) throw new Error(`signer ${url} lists no key`);
+  if (!current) throw new Error(`signer ${shown} lists no key`);
   return {
     keyid: current.keyid,
     async sign(payloadType, payload) {
       const r = await f(new URL("sign", base), { method: "POST", headers, body: JSON.stringify({ payloadType, payload }), signal: AbortSignal.timeout(5000) });
-      if (!r.ok) throw new Error(`signer ${url} refused to sign: ${r.status} ${(await r.text()).slice(0, 200)}`);
+      if (!r.ok) throw new Error(`signer ${shown} refused to sign: ${r.status} ${(await r.text()).slice(0, 200)}`);
       const env = (await r.json()) as Envelope;
-      if (typeof env.payload !== "string" || !Array.isArray(env.signatures)) throw new Error(`signer ${url} returned a malformed envelope`);
+      if (typeof env.payload !== "string" || !Array.isArray(env.signatures)) throw new Error(`signer ${shown} returned a malformed envelope`);
       return env;
     },
     async keys() {
       const k = await f(new URL("keys", base), { headers, signal: AbortSignal.timeout(10_000) });
-      if (!k.ok) throw new Error(`signer ${url} refused the key request: ${k.status}`);
+      if (!k.ok) throw new Error(`signer ${shown} refused the key request: ${k.status}`);
       return (await k.json()) as KeyDocument;
     },
   };
@@ -152,15 +153,25 @@ export function serveSigner(kp: KeyPair, opts: SignerServerOptions & { port: num
   });
 }
 
+/** The URL for an error message: no user, password, query, or fragment. */
+export function shownUrl(url: string): string {
+  try {
+    const u = new URL(url);
+    return `${u.protocol}//${u.host}${u.pathname}`;
+  } catch {
+    return "(a URL that does not parse)";
+  }
+}
+
 /** For verifiers: the keys a log publishes, fetched from its origin and returned as key references pinned by keyid. */
 export async function fetchLogKeys(logUrl: string, f: typeof fetch = fetch): Promise<{ doc: KeyDocument; keys: PublicKeyRef[] }> {
   const res = await f(new URL("/.well-known/agent-custody-log.json", logUrl), { signal: AbortSignal.timeout(10_000) });
-  if (!res.ok) throw new Error(`log ${logUrl} serves no key document: ${res.status}`);
+  if (!res.ok) throw new Error(`log ${shownUrl(logUrl)} serves no key document: ${res.status}`);
   const doc = (await res.json()) as KeyDocument;
-  if (!Array.isArray(doc.keys) || doc.keys.length === 0) throw new Error(`log ${logUrl} lists no keys`);
+  if (!Array.isArray(doc.keys) || doc.keys.length === 0) throw new Error(`log ${shownUrl(logUrl)} lists no keys`);
   const keys = doc.keys.map((k) => {
     const ref = publicKeyFromPem(k.publicKeyPem);
-    if (ref.keyid !== k.keyid) throw new Error(`log ${logUrl} lists key ${k.keyid.slice(0, 12)} whose pem has keyid ${ref.keyid.slice(0, 12)}`);
+    if (ref.keyid !== k.keyid) throw new Error(`log ${shownUrl(logUrl)} lists key ${k.keyid.slice(0, 12)} whose pem has keyid ${ref.keyid.slice(0, 12)}`);
     return ref;
   });
   return { doc, keys };

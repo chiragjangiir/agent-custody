@@ -44,6 +44,8 @@ Each receipt is an **observed bypass**: evidence that the agent connected to a d
 
 Run it with `agent-custody egress --config egress.json [--port 8791] [--host 127.0.0.1]`.
 
+`agent-custody check --config egress.json` reports what it can find before the witness starts: unknown keys; a key file that is missing or does not load (the witness does not start without it); an unset secret variable of an agent, and an unset `log.tokenEnv`, `splunk.tokenEnv`, or `otel.headersEnv` variable (by name, never the value); a missing `log.keys` file; a policy that does not exist, a Cedar policy that does not parse, or a Rego policy that does not compile (this needs `opa` on PATH, as the witness does); and that exactly one of `logFile` and `log` is set. It warns on a key file that other users can read, a Cedar policy with no permit rule, and `mode: "observe"`. It exits 1 on an error.
+
 ## How an agent uses it
 
 The agent sets `HTTPS_PROXY` and `HTTP_PROXY` to `http://<agent id>:<secret>@<witness>:8791`, and `NO_PROXY` to the gateway's host, because the gateway receipts its own calls. Most HTTP clients send the credential from the URL as `Proxy-Authorization: Basic`. Node's `fetch` reads these variables when `NODE_USE_ENV_PROXY=1` is set, on versions that support it. Other clients need their own proxy setting.
@@ -171,7 +173,6 @@ Vectors `egress-*` and `resigned-egress-*` in `vectors/receipts.json` cover them
 
 - Record the byte counts of a connection open when the witness is killed: the committed authorization is in the log, the closing receipt is not.
 - Identify an agent by its source address or by a signed grant. Today only per-agent proxy credentials identify an agent.
-- `agent-custody check` does not read an egress config yet.
 - Ask an OPA server for the decision. A `.rego` file works; `opa: { url }` does not, because the decision is made synchronously before the relay.
 
 Tutorials: [41-egress.ts](../examples/41-egress.ts), and [44-egress-rego.ts](../examples/44-egress-rego.ts) for a Rego policy.

@@ -4,13 +4,14 @@ import json
 import os
 import re
 import shutil
+import socket
 import subprocess
 import tempfile
 from pathlib import Path
 
 import pytest
 
-from agent_custody import Client
+from agent_custody import Client, receipt_id_of
 
 RECEIPTS = Path(__file__).resolve().parents[2] / "receipts"
 POLICY = 'permit(principal, action == Action::"customer.lookup", resource);\npermit(principal, action == Action::"stripe.refund", resource) when { context.args.amount <= 100000 };\n'
@@ -36,6 +37,30 @@ def sidecar():
 @pytest.fixture
 def client(sidecar):
     return Client(sidecar["url"])
+
+
+@pytest.fixture
+def recorded(client, sidecar, monkeypatch):
+    """The verified predicate of each receipt that `client.record` issues during the test, in order."""
+    out = []
+    real = client.record
+
+    def record(*a, **k):
+        bundle = real(*a, **k)
+        report = verify(sidecar, receipt_id_of(bundle))
+        assert report["ok"], report
+        out.append(report["statement"]["predicate"])
+        return bundle
+
+    monkeypatch.setattr(client, "record", record)
+    return out
+
+
+def closed_port() -> int:
+    """A port on 127.0.0.1 that nothing listens on."""
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
 
 
 def receipt_count(sidecar) -> int:

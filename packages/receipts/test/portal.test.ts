@@ -985,3 +985,131 @@ describe("enterprise sign-in", () => {
     expect((await store.ssoByDomain("held.example"))?.tenant).toBe("sso-co");
   });
 });
+
+describe("request validation and features that are not configured", () => {
+  // bare has no Stripe, mail, or OAuth, and a log URL with characters that HTML must escape
+  let bare: RunningPortal;
+  let paid: RunningPortal;
+  let store: PortalStore;
+  const send = async (p: RunningPortal, method: string, path: string, o: { body?: string; type?: string; cookie?: string; ip?: string } = {}) => {
+    const res = await fetch(new URL(path, p.url), { method, headers: { "x-forwarded-for": o.ip ?? "10.7.7.7", ...(o.type ? { "content-type": o.type } : {}), ...(o.cookie ? { cookie: o.cookie } : {}) }, body: o.body });
+    const text = await res.text();
+    let json: any = {};
+    try { json = JSON.parse(text); } catch {}
+    return { status: res.status, text, json };
+  };
+  const post = (p: RunningPortal, path: string, body: unknown, cookie?: string, ip?: string) => send(p, "POST", path, { body: JSON.stringify(body), type: "application/json", cookie, ip });
+  const owner = async (email: string, tenant: string) => {
+    const u = await store.createUser(email, "a-long-enough-password");
+    await store.addMember(u.id, tenant);
+    return `custody_session=${signSession(SECRET, u.id)}`;
+  };
+  const reg = { email: "val@guards.example", password: "a-long-enough-password", tenant: "guards-reg", name: "Val", company: "Guards" };
+
+  beforeAll(async () => {
+    store = new PortalStore(db);
+    const common = { tenancy, client: db, secret: SECRET, portalUrl: "https://app.example.test/", trustProxy: true, log: () => {} };
+    bare = await servePortal({ ...common, publicUrl: 'https://log.example.test/a<b>"c&d/' }, { port: 0 });
+    paid = await servePortal({ ...common, publicUrl: log.url, stripe: { secretKey: "sk_test_x", webhookSecret: WHSEC, priceTeam: "price_team", fetch: stripeFetch } }, { port: 0 });
+    await tenancy.addTenant("guards-a", "guards-a");
+  }, 60_000);
+  afterAll(async () => { await bare?.close(); await paid?.close(); });
+
+  it("answers /health and serves the page with the log URL escaped", async () => {
+    expect((await send(bare, "GET", "/health")).json).toEqual({ ok: true, stripe: false });
+    const h = await send(paid, "GET", "/health");
+    expect(h.status).toBe(200);
+    expect(h.json).toEqual({ ok: true, stripe: true });
+    const page = (await send(bare, "GET", "/")).text;
+    expect(page).toContain("https://log.example.test/a&lt;b&gt;&quot;c&amp;d/t/&lt;tenant&gt;/");
+    expect(page).not.toContain("a<b>");
+  });
+
+  // Pins a known defect. These are client errors: the right answers are 413 for the size and 400 for the other two.
+  // Change the three statuses here when the portal answers them.
+  it("known defect: refuses a body that is too large, not JSON, or not parseable with a 500, not a 413 or a 400", async () => {
+    const big = await send(bare, "POST", "/api/register", { body: JSON.stringify({ ...reg, pad: "x".repeat(70_000) }), type: "application/json" });
+    expect(big.status).toBe(500);
+    expect(big.json.error).toBe("body too large");
+    const form = await send(bare, "POST", "/api/register", { body: "email=a", type: "application/x-www-form-urlencoded" });
+    expect(form.status).toBe(500);
+    expect(form.json.error).toBe("expected a JSON body");
+    expect((await send(bare, "POST", "/api/register", { body: "{not json", type: "application/json" })).status).toBe(500);
+  });
+
+  it.each([
+    ["an email with no domain", { email: "val@" }, /valid email/],
+    ["no company", { company: " " }, /company or organisation/],
+    ["a phone with letters", { phone: "call me" }, /phone number/],
+  ])("registration refuses %s", async (_, change, error) => {
+    const r = await post(bare, "/api/register", { ...reg, ...change });
+    expect(r.status).toBe(400);
+    expect(r.json.error).toMatch(error);
+  });
+
+  it("throttles registrations and logins per address", async () => {
+    const regs = [];
+    for (let i = 0; i < 6; i++) regs.push((await post(bare, "/api/register", { email: `r${i}@guards.example`, password: "a-long-enough-password" }, undefined, "10.7.0.1")).status);
+    expect(regs).toEqual([200, 200, 200, 200, 200, 429]);
+    // another address still registers
+    expect((await post(bare, "/api/register", { email: "r9@guards.example", password: "a-long-enough-password" }, undefined, "10.7.0.2")).status).toBe(200);
+    const logins = [];
+    for (let i = 0; i < 9; i++) logins.push((await post(bare, "/api/login", { email: "r0@guards.example", password: "wrong-password!" }, undefined, "10.7.0.3")).status);
+    expect(logins).toEqual([401, 401, 401, 401, 401, 401, 401, 401, 429]);
+  });
+
+  it("refuses a bad or orphaned verify link, and a resend when mail is not configured", async () => {
+    const bad = await send(bare, "GET", "/verify-email?token=forged");
+    expect(bad.status).toBe(400);
+    expect(bad.text).toContain("not valid or has expired");
+    const orphan = await send(bare, "GET", `/verify-email?token=${signSession(SECRET, "verify:no-such-user")}`);
+    expect(orphan.status).toBe(400);
+    expect(orphan.text).toContain("belongs to no account");
+    const cookie = `custody_session=${signSession(SECRET, (await store.createUser("unverified@guards.example", "a-long-enough-password")).id)}`;
+    expect((await post(bare, "/api/verify-email", { token: "forged" }, cookie)).status).toBe(400);
+    const resend = await post(bare, "/api/verify-email/resend", {}, cookie);
+    expect(resend.status).toBe(503);
+    expect(resend.json.error).toMatch(/mail is not configured/);
+  });
+
+  it("answers 503 for every billing route when Stripe is not configured, and 409 when the tenant has no billing record", async () => {
+    const cookie = await owner("billing@guards.example", "guards-a");
+    for (const [path, c] of [["/stripe/webhook", undefined], ["/api/checkout", cookie], ["/api/billing-portal", cookie]] as const) {
+      const r = await post(bare, path, {}, c);
+      expect([path, r.status]).toEqual([path, 503]);
+      expect(r.json.error).toMatch(/billing is not configured/);
+    }
+    const none = await post(paid, "/api/billing-portal", {}, cookie);
+    expect(none.status).toBe(409);
+    expect(none.json.error).toBe("no billing record for this tenant");
+  });
+
+  it("refuses a tenant that no longer exists, a bad invite, an unknown member, a bad role, empty policy text, and an unknown path", async () => {
+    const ghost = await owner("ghost@guards.example", "guards-gone");
+    const gone = await send(bare, "GET", "/api/me", { cookie: ghost });
+    expect(gone.status).toBe(409);
+    expect(gone.json.error).toBe("the tenant no longer exists");
+    const cookie = await owner("admin@guards.example", "guards-a");
+    const invite = await post(bare, "/api/members", { email: "not-an-address", role: "readonly" }, cookie);
+    expect(invite.status).toBe(400);
+    expect(invite.json.error).toMatch(/valid email/);
+    const unknown = await post(bare, "/api/members/00000000-0000-0000-0000-000000000000/role", { role: "admin" }, cookie);
+    expect(unknown.status).toBe(404);
+    expect(unknown.json.error).toBe("no such member");
+    const self = (await store.members("guards-a")).find((m) => m.email === "admin@guards.example")!;
+    const role = await post(bare, `/api/members/${self.id}/role`, { role: "superuser" }, cookie);
+    expect(role.status).toBe(400);
+    expect(role.json.error).toMatch(/role must be one of/);
+    expect(await store.roleOf(self.id, "guards-a")).toBe("owner");
+    const policy = await post(bare, "/api/policies", { name: "empty", text: "  \n" }, cookie);
+    expect(policy.status).toBe(400);
+    expect(policy.json.error).toBe("the policy text is empty");
+    expect((await send(bare, "GET", "/nowhere")).status).toBe(404);
+    expect((await send(bare, "GET", "/api/nowhere", { cookie })).status).toBe(404);
+  });
+
+  it("refuses a table prefix that is not a plain identifier and an SSO domain that is not a domain", async () => {
+    expect(() => new PortalStore(db, "portal; DROP TABLE x;--")).toThrow(/plain identifier/);
+    await expect(store.setSso({ tenant: "guards-a", protocol: "oidc", config: { issuer: "https://idp.example", clientId: "c", clientSecret: "s" } as any, domains: ["not a domain"], defaultRole: "readonly", enforced: false })).rejects.toThrow(/email domains/);
+  });
+});

@@ -10,8 +10,9 @@ tool call an ADK agent makes gets a receipt and a denied one never runs.
     agent = LlmAgent(name="billing", model="gemini-2.5-flash", tools=[...], **adk_callbacks(Client()))
 
 before_tool_callback: evaluate the policy; on deny, record a denial receipt and return the error dict naming the
-receipt, which the model sees as the tool's result. On allow, or with no policy, return None so the tool runs. If the
-denial receipt cannot be recorded the call is still skipped: nothing runs without evidence. after_tool_callback
+receipt, which the model sees as the tool's result. On allow, or with no policy, return None so the tool runs. When the
+sidecar cannot answer, answers without an allow or deny decision, or cannot record the denial, the call is still
+skipped, and the error says "no receipt: <why>": nothing runs without evidence. after_tool_callback
 records the completed call and returns None, leaving the response as it was; the denial dict the before callback
 returned is recognised and not recorded a second time.
 
@@ -22,7 +23,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, Optional
 
-from . import Client, denies, receipt_id_of
+from . import Client, denies, no_receipt, receipt_id_of
 
 RECEIPT_KEY = "agent-custody/receipt"
 
@@ -42,17 +43,23 @@ def adk_callbacks(client: Client) -> Dict[str, Callable[..., Any]]:
     """The two callbacks, keyed by the LlmAgent fields they go in: `LlmAgent(..., **adk_callbacks(client))`."""
 
     def before_tool_callback(tool: Any, args: Dict[str, Any], tool_context: Any) -> Optional[Dict[str, Any]]:
-        session = _session(tool_context)
-        policy = client.decide(tool.name, args, session=session)
-        if not denies(policy):
-            return None
-        reason = "; ".join(policy["reasons"] + policy["errors"]) or "no permit policy matched"
+        # A raise here ends the whole ADK run, and an answer read as "not a deny" lets the tool run, so every failure
+        # answers the error dict instead: ADK skips the tool and the model sees why.
         try:
-            bundle = client.record(tool.name, args, {"status": "denied", "reason": reason}, policy, session=session)
-            rid = receipt_id_of(bundle)
-            return {"error": f"agent-custody: {reason} (receipt {rid})", RECEIPT_KEY: rid}
+            session = _session(tool_context)
+            policy = client.decide(tool.name, args, session=session)
+            if policy is not None and (not isinstance(policy, dict) or policy.get("decision") not in ("allow", "deny")):
+                raise ValueError("the sidecar answered without an allow or deny decision")
+            if not denies(policy):
+                return None
+            reason = "; ".join(str(r) for r in [*(policy.get("reasons") or []), *(policy.get("errors") or [])]) or "no permit policy matched"
+        except Exception as e:  # noqa: BLE001
+            return {"error": f"agent-custody: the policy could not be evaluated; {no_receipt(e)}", RECEIPT_KEY: None}
+        try:
+            rid = receipt_id_of(client.record(tool.name, args, {"status": "denied", "reason": reason}, policy, session=session))
         except Exception as e:  # noqa: BLE001 - the call stays skipped; the missing receipt is the message
-            return {"error": f"agent-custody: {reason}; the denial receipt could not be recorded ({e})", RECEIPT_KEY: None}
+            return {"error": f"agent-custody: {reason} ({no_receipt(e)})", RECEIPT_KEY: None}
+        return {"error": f"agent-custody: {reason} (receipt {rid})", RECEIPT_KEY: rid}
 
     def after_tool_callback(tool: Any, args: Dict[str, Any], tool_context: Any, tool_response: Any) -> Optional[Dict[str, Any]]:
         if isinstance(tool_response, dict) and RECEIPT_KEY in tool_response:

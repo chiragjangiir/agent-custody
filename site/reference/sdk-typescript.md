@@ -130,6 +130,8 @@ Each records the framework's tool calls through the issuer. Enforce or observe, 
 | `@agent-custody/receipts/sdk/deepseek-harness` | `deepseekHarnessHooks(issuer)` → `{ preExecute, postExecute }` | `preExecute(exec, next)` returns `{ kind: "deny", reason }` on an enforced policy deny after issuing the denial receipt, else `next()`; `postExecute(exec, result, next)` records the executed (`content`/`value`) or failed (`error`) call, then `next()`. `exec` is the harness's `{ name, arguments, callId, agent }` |
 | `@agent-custody/receipts/sdk/deepseek-harness` | `registerDeepSeekHarness(ctx, issuer)` | calls `ctx.on` for both events |
 
+When an enforcing adapter cannot issue the denial receipt, the call stays denied and the reason ends with `(no receipt: <why>)` in place of `(receipt <id>)`. `noReceipt(error)`, exported from the package root, builds that text: `no receipt: the receipt could not be recorded`. The reason reaches the model, and the error can carry the log's answer, so `noReceipt` writes the error to stderr and keeps it out of the reason. A log error shows the log URL without its user, password, or query string. `handleHookEvent`, OpenAI Agents `wrapTools`, `openclawHooks`, and `deepseekHarnessHooks` use it. The Vercel AI `wrapTools` and `issuer.wrap` throw `PolicyDeniedError`, which needs a receipt id, so a failed denial receipt there still rejects with the log's error.
+
 ## Agents over A2A
 
 Exported from `@agent-custody/receipts` beside the gateway. They belong to the gateway, not the in-process issuer, and are listed here with the other exports; the behaviour is on the [gateway](./gateway#an-a2a-agent-as-an-upstream) page.

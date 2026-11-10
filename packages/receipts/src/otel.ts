@@ -71,7 +71,7 @@ export function spanFor(p: ReceiptPredicate, bundle: ReceiptBundle, serviceName:
                 traceId,
                 spanId: traceId.slice(0, 16),
                 name: reconciliation ? `${p.tool.name} reconciliation` : `${p.tool.name}`,
-                kind: 3, // CLIENT: the agent calling out
+                kind: p.issuer.kind === "door" ? 2 : 3, // SERVER for an inbound request; CLIENT for the agent calling out
                 startTimeUnixNano: start.toString(),
                 endTimeUnixNano: (end > start ? end : start).toString(),
                 attributes,

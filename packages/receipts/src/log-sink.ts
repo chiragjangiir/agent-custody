@@ -10,7 +10,7 @@ import { dsseSign, dsseVerify, loadPublicKey, type Envelope, type KeyPair, type 
 import { createHash } from "node:crypto";
 import { leafHash, MerkleLog, verifyInclusion, type InclusionProof } from "./log.ts";
 import { type AuditEntry, type QuotaState, fileBackend, RateLimiter, type LogBackend, type PostgresTenancy, type RateLimitOptions , type PolicyRecord } from "./log-store.ts";
-import { fetchLogKeys, localSigner, type Signer } from "./signer.ts";
+import { fetchLogKeys, localSigner, shownUrl, type Signer } from "./signer.ts";
 import type { Checkpoint, CheckpointStore } from "./checkpoints.ts";
 import { adminRoutes, type AdminOptions } from "./log-admin.ts";
 import { TREEHEAD_TYPE, type TreeHead } from "./receipt.ts";
@@ -82,18 +82,19 @@ export interface HttpLogOptions {
  */
 export function httpLog(url: string, opts: HttpLogOptions = {}): LogSink {
   const f = opts.fetch ?? fetch;
+  const shown = shownUrl(url);
   const base = url.endsWith("/") ? url : `${url}/`;
   const attempts = opts.retries ?? 3;
   const timeoutMs = opts.timeoutMs ?? 10_000;
   let pinned: Promise<PublicKeyRef[]> | null = opts.keys?.length ? Promise.resolve(opts.keys) : null;
-  const keys = () => (pinned ??= fetchLogKeys(base, f).then((r) => r.keys).catch((e) => { pinned = null; throw new Error(`log ${url}: its keys could not be fetched to check the append, and none are configured: ${e instanceof Error ? e.message : String(e)}`); }));
+  const keys = () => (pinned ??= fetchLogKeys(base, f).then((r) => r.keys).catch((e) => { pinned = null; throw new Error(`log ${shown}: its keys could not be fetched to check the append, and none are configured: ${e instanceof Error ? e.message : String(e)}`); }));
   const checked = async (entry: LogAppend, leaf: string): Promise<LogAppend> => {
     const th = dsseVerify(entry.treeHead, await keys());
-    if (!th.ok || entry.treeHead.payloadType !== TREEHEAD_TYPE) throw new Error(`log ${url} answered with a tree head that does not verify against its keys${th.ok ? " (wrong payload type)" : `: ${th.error}`}`);
+    if (!th.ok || entry.treeHead.payloadType !== TREEHEAD_TYPE) throw new Error(`log ${shown} answered with a tree head that does not verify against its keys${th.ok ? " (wrong payload type)" : `: ${th.error}`}`);
     const head = th.payload as TreeHead;
-    if (opts.logId !== undefined && head.log !== opts.logId) throw new Error(`log ${url} signed a tree head for log "${head.log ?? ""}", not "${opts.logId}"`);
-    if (head.treeSize !== entry.inclusion.treeSize) throw new Error(`log ${url} answered with a tree head of size ${head.treeSize} and a proof for size ${entry.inclusion.treeSize}`);
-    if (!verifyInclusion(leafHash(leaf), entry.inclusion, head.rootHash)) throw new Error(`log ${url} answered with an inclusion proof that does not place this leaf under the signed root`);
+    if (opts.logId !== undefined && head.log !== opts.logId) throw new Error(`log ${shown} signed a tree head for log "${head.log ?? ""}", not "${opts.logId}"`);
+    if (head.treeSize !== entry.inclusion.treeSize) throw new Error(`log ${shown} answered with a tree head of size ${head.treeSize} and a proof for size ${entry.inclusion.treeSize}`);
+    if (!verifyInclusion(leafHash(leaf), entry.inclusion, head.rootHash)) throw new Error(`log ${shown} answered with an inclusion proof that does not place this leaf under the signed root`);
     return entry;
   };
   return {
@@ -111,16 +112,16 @@ export function httpLog(url: string, opts: HttpLogOptions = {}): LogSink {
             signal: AbortSignal.timeout(timeoutMs),
           });
         } catch (e) {
-          last = `log ${url} unreachable: ${e instanceof Error ? e.message : String(e)}`;
+          last = `log ${shown} unreachable: ${e instanceof Error ? e.message : String(e)}`;
           if (i + 1 < attempts) await new Promise((r) => setTimeout(r, 200 * 2 ** i));
           continue;
         }
         if (res.ok) {
           const body = (await res.json()) as Partial<LogAppend>;
-          if (!body.inclusion || !body.treeHead) throw new Error(`log ${url} returned a malformed append result`);
+          if (!body.inclusion || !body.treeHead) throw new Error(`log ${shown} returned a malformed append result`);
           return checked(body as LogAppend, leaf);
         }
-        last = `log ${url} refused the append: ${res.status} ${(await res.text()).slice(0, 200)}`;
+        last = `log ${shown} refused the append: ${res.status} ${(await res.text()).slice(0, 200)}`;
         if (res.status !== 429 && res.status < 500) break;
         if (i + 1 < attempts) {
           const after = Number(res.headers.get("retry-after"));

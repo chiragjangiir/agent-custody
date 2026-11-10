@@ -17,7 +17,7 @@
 // `agent-custody hook` command works through it unchanged, one process per call. This plugin is the in-process path.
 import { z } from "zod";
 import { loadSdkConfig } from "../config.ts";
-import { createSdkIssuer, denies, receiptIdOf, type SdkIssuer, type ToolEvent } from "./index.ts";
+import { createSdkIssuer, denies, noReceipt, receiptIdOf, type SdkIssuer, type ToolEvent } from "./index.ts";
 
 /** The fields of the harness's ToolExecution this adapter reads. */
 export interface DshToolExecution {
@@ -62,7 +62,7 @@ export function deepseekHarnessHooks(issuer: SdkIssuer) {
         const bundle = await issuer.record(ev, { status: "denied", reason }, policy);
         return { kind: "deny", reason: `agent-custody: ${reason} (receipt ${receiptIdOf(bundle)})` };
       } catch (e) {
-        return { kind: "deny", reason: `agent-custody: ${reason}; the denial receipt could not be issued (${e instanceof Error ? e.message : String(e)})` };
+        return { kind: "deny", reason: `agent-custody: ${reason} (${noReceipt(e)})` };
       }
     },
     postExecute: async (exec: DshToolExecution, result: DshToolExecutionResult, next: () => Promise<DshPostToolDecision>): Promise<DshPostToolDecision> => {

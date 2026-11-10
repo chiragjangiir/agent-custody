@@ -8,17 +8,29 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import urllib.error
 import urllib.request
+from urllib.parse import urlsplit, urlunsplit
 from typing import Any, Callable, Dict, Optional
 
-__all__ = ["Client", "PolicyDeniedError", "SidecarError", "receipt_id_of"]
+__all__ = ["Client", "PolicyDeniedError", "SidecarError", "no_receipt", "receipt_id_of"]
 
 DEFAULT_URL = "http://127.0.0.1:8788/"
 
+_log = logging.getLogger("agent_custody")
+
 
 class SidecarError(RuntimeError):
-    """The sidecar refused or could not complete a request. No receipt was written."""
+    """The sidecar refused or could not complete a request. No receipt was written.
+
+    `kind` is "unreachable", "status" (the sidecar answered an HTTP error; `status` holds the code), "malformed"
+    (the answer was not JSON), or None."""
+
+    def __init__(self, message: str, kind: Optional[str] = None, status: Optional[int] = None):
+        super().__init__(message)
+        self.kind = kind
+        self.status = status
 
 
 class PolicyDeniedError(PermissionError):
@@ -32,6 +44,29 @@ class PolicyDeniedError(PermissionError):
 def denies(policy: Optional[Dict[str, Any]]) -> bool:
     """True when a decision is a deny that must be enforced. A deny made in observe mode carries enforced=False: recorded, not acted on."""
     return bool(policy) and policy["decision"] == "deny" and policy.get("enforced", True) is not False
+
+
+def _shown(url: str) -> str:
+    """The URL for an error message: no user, password, query, or fragment."""
+    p = urlsplit(url)
+    return urlunsplit((p.scheme, p.netloc.rpartition("@")[2], p.path, "", ""))
+
+
+def no_receipt(e: BaseException) -> str:
+    """The end of a deny reason whose receipt could not be written: `no receipt: <why>`. The reason reaches the
+    model, so it names the failure class only; the error itself, which can carry a sidecar URL with credentials or
+    the text of an upstream answer, goes to the `agent_custody` logger."""
+    _log.warning("agent-custody: no receipt: %s", e)
+    if isinstance(e, SidecarError):
+        if e.kind == "unreachable":
+            return "no receipt: the sidecar could not be reached"
+        if e.kind == "status" and e.status is not None:
+            return f"no receipt: the sidecar answered HTTP {e.status}"
+        if e.kind != "malformed":
+            return "no receipt: the sidecar refused the request"
+    if isinstance(e, (SidecarError, KeyError, TypeError, ValueError)):
+        return "no receipt: the sidecar's answer was malformed"
+    return f"no receipt: an unexpected {type(e).__name__}"
 
 
 def receipt_id_of(bundle: Dict[str, Any]) -> str:
@@ -57,15 +92,21 @@ class Client:
         req = urllib.request.Request(self.url + path, data=json.dumps(body).encode(), headers={"content-type": "application/json"}, method="POST")
         try:
             with urllib.request.urlopen(req, timeout=self.timeout) as res:
-                return json.loads(res.read())
+                raw = res.read()
         except urllib.error.HTTPError as e:
             try:
                 detail = json.loads(e.read()).get("error", "")
             except Exception:
                 detail = ""
-            raise SidecarError(f"sidecar {path}: {e.code} {detail}".strip()) from None
+            raise SidecarError(f"sidecar {path}: {e.code} {detail}".strip(), "status", e.code) from None
         except urllib.error.URLError as e:
-            raise SidecarError(f"sidecar unreachable at {self.url}: {e.reason}") from None
+            raise SidecarError(f"sidecar unreachable at {_shown(self.url)}: {e.reason}", "unreachable") from None
+        except OSError as e:
+            raise SidecarError(f"sidecar unreachable at {_shown(self.url)}: {e}", "unreachable") from None
+        try:
+            return json.loads(raw)
+        except ValueError:
+            raise SidecarError(f"sidecar {path}: the answer is not JSON", "malformed") from None
 
     def health(self) -> Dict[str, Any]:
         with urllib.request.urlopen(self.url + "health", timeout=self.timeout) as res:

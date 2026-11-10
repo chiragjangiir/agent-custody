@@ -2,9 +2,11 @@
 import asyncio
 import json
 
+import httpx
 import pytest
 
-from agent_custody.memory import MemoryClient, MemoryError
+from agent_custody.memory import MemoryClient, MemoryError, _refusal
+from conftest import closed_port
 
 
 def run(coro):
@@ -47,4 +49,30 @@ def test_wrong_token_is_refused(memory_server):
         async with MemoryClient(memory_server["url"], token="nope") as memory:
             await memory.read()
     with pytest.raises(MemoryError, match="refused the connection: HTTP 401"):
+        run(go())
+
+
+def test_refusal_finds_the_http_status_inside_exception_groups():
+    status = httpx.HTTPStatusError("bad", request=httpx.Request("POST", "http://127.0.0.1/mcp"), response=httpx.Response(503))
+    assert _refusal(ExceptionGroup("outer", [ValueError("other"), ExceptionGroup("inner", [status])])) == "HTTP 503"
+    assert _refusal(ExceptionGroup("outer", [ExceptionGroup("inner", [ValueError("socket closed")])])) == "socket closed"
+    assert _refusal(ExceptionGroup("outer", [TimeoutError()])) == "TimeoutError"
+
+
+def test_a_failed_handshake_is_a_memory_error(sidecar):
+    async def go():
+        async with MemoryClient(sidecar["url"] + "mcp") as memory:
+            await memory.read()
+    # the sidecar answers the probe with 404, not 401, so the MCP handshake runs and fails
+    with pytest.raises(MemoryError, match="refused the connection") as e:
+        run(go())
+    assert e.value.__cause__ is None
+
+
+@pytest.mark.xfail(strict=True, raises=httpx.ConnectError, reason="the probe runs outside the try, so a closed port raises httpx.ConnectError")
+def test_a_closed_port_is_a_memory_error():
+    async def go():
+        async with MemoryClient(f"http://127.0.0.1:{closed_port()}/mcp") as memory:
+            await memory.read()
+    with pytest.raises(MemoryError, match="refused the connection"):
         run(go())

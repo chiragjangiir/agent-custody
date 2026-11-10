@@ -21,6 +21,8 @@ agent-custody is infrastructure to authorize the actions of AI agents and to acc
 
 The fastest way to try it is [the Claude Code hook](#start-with-a-coding-agent): one command. Before you rely on any part, read [the threat model](packages/receipts/docs/threat-model.md). It lists what each part defends, and what it does not.
 
+Run a website or an API? [Put the door in front of it](packages/receipts/docs/door-quickstart.md): a sign-up form that refuses bots, admits a person who passes a challenge and an agent with a passport, and receipts every arrival, in about fifteen minutes.
+
 ## How it works
 
 ```text

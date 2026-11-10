@@ -2,12 +2,13 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { loadSdkConfig } from "../src/config.ts";
 import { generateKeyPair, loadPublicKey, writeKeyPair } from "../src/crypto.ts";
 import type { ReceiptBundle, ReceiptStatement } from "../src/receipt.ts";
-import { handleHookEvent } from "../src/sdk/claude.ts";
+import { claudeAgentHooks, handleHookEvent } from "../src/sdk/claude.ts";
 import { createSdkIssuer, PolicyDeniedError, receiptIdOf, type SdkIssuer } from "../src/sdk/index.ts";
+import { observeRunner, wrapTools } from "../src/sdk/openai-agents.ts";
 import { verifyBundle, type VerifyOptions } from "../src/verify.ts";
 
 const POLICY = `permit(principal, action == Action::"customer.lookup", resource);
@@ -83,6 +84,13 @@ describe("sdk wrap()", () => {
     await expect(payout({ amount: 10 ** 9 })).resolves.toBe(10 ** 9);
     expect(decode(bundleFor(lastReceiptId())).predicate.policy).toBeNull();
   });
+
+  it("refuses a captureKeyEnv that names a variable that is not set", () => {
+    delete process.env.AGENT_CUSTODY_TEST_UNSET_CAPTURE_KEY;
+    expect(() => createSdkIssuer({ ...loadSdkConfig(configFile), captureKeyEnv: "AGENT_CUSTODY_TEST_UNSET_CAPTURE_KEY" })).toThrow(
+      "capture key: environment variable AGENT_CUSTODY_TEST_UNSET_CAPTURE_KEY is not set",
+    );
+  });
 });
 
 describe("Claude Code hook handler", () => {
@@ -152,7 +160,7 @@ forbid(principal, action == Action::"Bash", resource) when { context.args.comman
     const broken = { ...sdk, record: () => Promise.reject(new Error("log unreachable")) };
     const out = await handleHookEvent(broken, { hook_event_name: "PreToolUse", tool_name: "stripe.refund", tool_input: { amount: 999999 } });
     expect(out.hookSpecificOutput?.permissionDecision).toBe("deny");
-    expect(out.hookSpecificOutput?.permissionDecisionReason).toContain("no receipt: log unreachable");
+    expect(out.hookSpecificOutput?.permissionDecisionReason).toMatch(/\(no receipt: the receipt could not be recorded\)$/);
   });
 
   it("PreToolUse: still denies when the receipt id cannot be read from the recorded bundle", async () => {
@@ -173,6 +181,26 @@ forbid(principal, action == Action::"Bash", resource) when { context.args.comman
     expect(st.predicate.tool.name).toBe("customer.lookup");
   });
 
+  it("PostToolUseFailure: issues a failed receipt carrying the error", async () => {
+    await handleHookEvent(sdk, { hook_event_name: "PostToolUseFailure", tool_name: "customer.lookup", tool_input: { id: "c1" }, error: "exit 1", tool_response: "ignored" });
+    expect(decode(bundleFor(lastReceiptId())).predicate.execution).toMatchObject({ status: "failed", result: "exit 1" });
+  });
+
+  it("claudeAgentHooks: registers one callback for the three events, passes the matcher through, and the callback issues receipts", async () => {
+    const hooks = claudeAgentHooks(sdk, "customer.lookup");
+    expect(Object.keys(hooks)).toEqual(["PreToolUse", "PostToolUse", "PostToolUseFailure"]);
+    for (const entries of Object.values(hooks)) expect(entries).toEqual([{ matcher: "customer.lookup", hooks: [expect.any(Function)] }]);
+    expect(claudeAgentHooks(sdk).PostToolUse[0]).not.toHaveProperty("matcher");
+
+    await hooks.PostToolUse[0]!.hooks[0]!({ hook_event_name: "PostToolUse", session_id: "s9", tool_name: "customer.lookup", tool_input: { id: "c9" }, tool_response: { ok: 1 } });
+    const st = decode(bundleFor(lastReceiptId()));
+    expect(st.predicate.session.id).toBe("s9");
+    expect(st.predicate.execution).toMatchObject({ status: "executed", result: { ok: 1 } });
+
+    const out = await hooks.PreToolUse[0]!.hooks[0]!({ hook_event_name: "PreToolUse", tool_name: "stripe.refund", tool_input: { amount: 999999 } });
+    expect(out.hookSpecificOutput?.permissionDecision).toBe("deny");
+  });
+
   it("CLI `hook` reads the event from stdin and prints the decision", () => {
     const r = spawnSync(process.execPath, [resolve("src/cli.ts"), "hook"], {
       input: JSON.stringify({ hook_event_name: "PreToolUse", tool_name: "stripe.refund", tool_input: { amount: 999999 } }),
@@ -181,6 +209,50 @@ forbid(principal, action == Action::"Bash", resource) when { context.args.comman
     });
     expect(r.status, r.stderr).toBe(0);
     expect(JSON.parse(r.stdout).hookSpecificOutput.permissionDecision).toBe("deny");
+  });
+});
+
+describe("OpenAI Agents adapter, without the package", () => {
+  const wrapped = () =>
+    wrapTools(sdk, [
+      { name: "customer.lookup", invoke: async (_ctx: unknown, _input: string, _details?: unknown) => "plain text, not JSON" },
+      { name: "customer.lookup", invoke: async () => Promise.reject(new Error("upstream down")) },
+    ]);
+
+  it("wrapTools: parses empty, non-JSON, and non-object input, and keeps a non-JSON result as text", async () => {
+    const [t] = wrapped();
+    await expect(t!.invoke({}, "")).resolves.toBe("plain text, not JSON");
+    const st = decode(bundleFor(lastReceiptId()));
+    expect(st.predicate.request.args).toEqual({});
+    expect(st.predicate.execution).toMatchObject({ status: "executed", result: "plain text, not JSON" });
+    await t!.invoke({}, "not json");
+    expect(decode(bundleFor(lastReceiptId())).predicate.request.args).toEqual({ input: "not json" });
+    await t!.invoke({}, "[1,2]");
+    expect(decode(bundleFor(lastReceiptId())).predicate.request.args).toEqual({ input: [1, 2] });
+  });
+
+  it("wrapTools: a tool that throws gets an error receipt, and the error is rethrown", async () => {
+    const [, t] = wrapped();
+    await expect(t!.invoke({}, JSON.stringify({ id: "c1" }), { toolCall: { callId: "call_e" } })).rejects.toThrow("upstream down");
+    const st = decode(bundleFor(lastReceiptId()));
+    expect(st.predicate.session.toolUseId).toBe("call_e");
+    expect(st.predicate.execution).toMatchObject({ status: "error", error: "upstream down" });
+  });
+
+  it("observeRunner: a log that refuses the receipt is reported on stderr, not thrown", async () => {
+    const listeners = new Map<string, (...a: unknown[]) => void>();
+    const runner = { on: (e: string, l: (...a: unknown[]) => void) => listeners.set(e, l) };
+    const broken = { ...sdk, record: () => Promise.reject(new Error("log unreachable")) };
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      observeRunner(broken, runner);
+      const details = { toolCall: { callId: "call_x", arguments: "{}" } };
+      listeners.get("agent_tool_start")!({}, {}, { name: "customer.lookup" }, details);
+      expect(() => listeners.get("agent_tool_end")!({}, {}, { name: "customer.lookup" }, "ok", details)).not.toThrow();
+      await vi.waitFor(() => expect(err).toHaveBeenCalledWith("agent-custody: receipt not issued: log unreachable"));
+    } finally {
+      err.mockRestore();
+    }
   });
 });
 
