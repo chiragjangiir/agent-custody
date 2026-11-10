@@ -3,6 +3,7 @@
 // matched against verified receipts. These tests drive a real gateway against the stand-in Stripe, then answer the
 // auditor's list call from a stub, so nothing reaches the network.
 import { spawnSync } from "node:child_process";
+import { createRequire } from "node:module";
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -293,6 +294,77 @@ describe("completeness from the provider's side", () => {
     expect(report.matched).toEqual([{ receiptId: made[0]!.receiptId, providerId: refund_id }]);
     expect(report.complete).toBe(true);
     rmSync(g.dir, { recursive: true, force: true });
+  });
+
+  it("calls a receipt unmatchable when the id path does not reach a string in its result", async () => {
+    const report = await checkCompleteness(opts(theProvider(), { idPath: "refund_id.value" }));
+    expect(report.unmatchable).toEqual(expect.arrayContaining(refunds.map((r) => ({ receiptId: r.receiptId, reason: 'the result has no string at "refund_id.value"' }))));
+    expect(report.unmatchable).toHaveLength(2);
+    expect(report.matched).toEqual([]);
+    expect(report.providerOnly.map((p) => p.providerId).sort()).toEqual(refunds.map((r) => r.refundId).sort());
+    expect(report.complete).toBe(false);
+  });
+
+  it("calls a receipt unmatchable when its result content is withheld and only other fields stay in clear", async () => {
+    const { g, made, with: w } = await gatewayWith((cfg) => (cfg.capture = { "stripe.refund": { result: { mode: "digest", clear: ["isError"] } } }), [{ customer_id: "cust_123", amount: 300 }]);
+    const report = await checkCompleteness(w([]));
+    expect(report.unmatchable).toEqual([{ receiptId: made[0]!.receiptId, reason: expect.stringMatching(/result content is withheld/) }]);
+    expect(report.complete).toBe(false);
+    rmSync(g.dir, { recursive: true, force: true });
+  });
+
+  it("calls a receipt unmatchable when its result text is not JSON", async () => {
+    const req = createRequire(import.meta.url);
+    const sdk = (p: string) => JSON.stringify(req.resolve(`@modelcontextprotocol/sdk/${p}`));
+    // answers the facts lookup in JSON and the refund in plain text
+    const upstream = `const {Server}=require(${sdk("server/index.js")});const {StdioServerTransport}=require(${sdk("server/stdio.js")});const t=require(${sdk("types.js")});
+      const s=new Server({name:"plain",version:"0"},{capabilities:{tools:{}}});
+      s.setRequestHandler(t.ListToolsRequestSchema,async()=>({tools:["customer.lookup","stripe.refund"].map((name)=>({name,inputSchema:{type:"object"}}))}));
+      s.setRequestHandler(t.CallToolRequestSchema,async({params})=>({content:[{type:"text",text:params.name==="customer.lookup"?JSON.stringify({verified:true}):"refunded"}]}));
+      s.connect(new StdioServerTransport());`;
+    const { g, made, with: w } = await gatewayWith((cfg) => (cfg.upstream = { command: process.execPath, args: ["-e", upstream] }), [{ customer_id: "cust_123", amount: 300 }]);
+    expect(made[0]!.text).toBe("refunded");
+    const report = await checkCompleteness(w([]));
+    expect(report.unmatchable).toEqual([{ receiptId: made[0]!.receiptId, reason: "the result's text is not JSON" }]);
+    expect(report.complete).toBe(false);
+    rmSync(g.dir, { recursive: true, force: true });
+  });
+
+  it("puts a receipt or authorization file that cannot be read in unverified, and never matches it", async () => {
+    const copy = mkdtempSync(join(tmpdir(), "completeness-malformed-"));
+    for (const name of readdirSync(fx.receiptsDir).filter((n) => n.endsWith(".json"))) writeFileSync(join(copy, name), readFileSync(join(fx.receiptsDir, name)));
+    writeFileSync(join(copy, `${refunds[0]!.receiptId}.json`), "not json");
+    writeFileSync(join(copy, "orphan.authorization.json"), "{}");
+    const report = await checkCompleteness({ ...opts(theProvider()), receiptsDir: copy });
+    expect(report.unverified.map((u) => u.file).sort()).toEqual([`${refunds[0]!.receiptId}.json`, "orphan.authorization.json"]);
+    expect(report.unverified.every((u) => u.failing.length === 1)).toBe(true);
+    expect(report.matched.map((m) => m.receiptId)).toEqual([refunds[1]!.receiptId]);
+    expect(report.providerOnly.map((p) => p.providerId)).toEqual([refunds[0]!.refundId]);
+    expect(report.complete).toBe(false);
+    rmSync(copy, { recursive: true, force: true });
+  });
+
+  it("calls an amount withheld under a capture rule unmatchable, instead of skipping the comparison", async () => {
+    const { g, made, with: w } = await gatewayWith((cfg) => (cfg.capture = { "stripe.refund": { args: { mode: "digest", clear: ["customer_id"] }, result: { mode: "clear" } } }), [{ customer_id: "cust_123", amount: 300 }]);
+    const { refund_id } = JSON.parse(made[0]!.text) as { refund_id: string };
+    const report = await checkCompleteness(w([{ id: refund_id, created: Math.floor(Date.now() / 1000), amount: 999 }]));
+    expect(report.matched.map((m) => m.providerId)).toEqual([refund_id]);
+    expect(report.unmatchable).toEqual([{ receiptId: made[0]!.receiptId, reason: expect.stringMatching(/"amount" is withheld/) }]);
+    expect(report.mismatches).toEqual([]);
+    expect(report.complete).toBe(false);
+    rmSync(g.dir, { recursive: true, force: true });
+  });
+
+  it("calls a receipt without the beneficiary argument unmatchable", async () => {
+    const report = await checkCompleteness(opts(theProvider(), { beneficiary: { charge: "charge" } }));
+    expect(report.unmatchable.map((u) => u.receiptId).sort()).toEqual(refunds.map((r) => r.receiptId).sort());
+    expect(report.unmatchable.every((u) => /beneficiary argument "charge" is missing/.test(u.reason))).toBe(true);
+    expect(report.complete).toBe(false);
+  });
+
+  it("stops on a Stripe object without an id instead of skipping it", async () => {
+    const f = (async () => Response.json({ object: "list", data: [{ object: "refund", created: Math.floor(Date.now() / 1000), amount: 100 }], has_more: false })) as typeof fetch;
+    await expect(checkCompleteness({ ...opts([]), source: stripeSource({ secretKey: KEY, object: "refunds", fetch: f }) })).rejects.toThrow(/without an id/);
   });
 
   it("stops on a provider error instead of reporting a partial list as complete", async () => {
