@@ -4,6 +4,7 @@ All three packages, `@agent-custody/receipts`, `@agent-custody/state`, and `agen
 
 ## Unreleased
 
+- **`check` rejects a regular file as a configured path's parent directory.** `writableAncestor` in `packages/receipts/src/check.ts` checks that the nearest existing path above a configured directory (such as `receiptsDir` or `logFile`) is an actual directory (`statSync(dir).isDirectory()`), preventing misleading `ok` paths findings when a parent path is a regular file (#305).
 - **Review rules for Cursor Bugbot.** `.cursor/BUGBOT.md` tells the automatic pull request reviewer what this repository treats as a bug: fail-open paths, weakened security invariants, verifiers out of step, vectors regenerated without cause, secrets, network calls without a timeout or in tests, money as a float, unescaped portal output, and caches that can mix callers. It also lists the gaps to flag (no test, stale docs, no CHANGELOG entry) and what not to flag. `CONTRIBUTING.md` says to keep it in step.
 
 ## 0.16.2 — 2026-11-09

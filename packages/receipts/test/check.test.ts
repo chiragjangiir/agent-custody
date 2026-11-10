@@ -101,6 +101,18 @@ describe("agent-custody check", () => {
     expect(r).toContain("approvals.usedDir");
   });
 
+  it("a regular file in a configured path's ancestor is reported as a paths error", async () => {
+    const fx = fresh();
+    const blocker = join(fx.dir, "blocker-file");
+    writeFileSync(blocker, "regular file");
+    edit(fx.configFile, (c) => {
+      c.receiptsDir = join(blocker, "receipts");
+    });
+    const r = errors(await checkConfig(fx.configFile)).filter((f) => f.check === "paths");
+    expect(r.length).toBeGreaterThan(0);
+    expect(r.some((f) => f.message.includes("receipts cannot be created"))).toBe(true);
+  });
+
   it("an expired grant is an error", async () => {
     const fx = fresh(-60_000);
     const e = errors(await checkConfig(fx.configFile)).find((f) => f.check === "grant");

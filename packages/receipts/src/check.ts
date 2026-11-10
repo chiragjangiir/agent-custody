@@ -56,6 +56,7 @@ function writableAncestor(path: string): string | null {
     dir = up;
   }
   try {
+    if (!statSync(dir).isDirectory()) return null;
     accessSync(dir, constants.W_OK);
     return dir;
   } catch {
