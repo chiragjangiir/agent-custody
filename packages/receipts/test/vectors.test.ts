@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { canonicalize, digestOf, dsseVerify, publicKeyFromPem } from "../src/crypto.ts";
 import { leafHash, rootOf, verifyConsistency, verifyInclusion } from "../src/log.ts";
-import { auditExtends, verifyBundle } from "../src/verify.ts";
+import { auditExtends, formatReport, verifyBundle } from "../src/verify.ts";
 
 const dir = join(import.meta.dirname, "..", "vectors");
 const load = (f: string) => JSON.parse(readFileSync(join(dir, f), "utf8"));
@@ -29,6 +29,18 @@ describe("conformance vectors", () => {
       expect({ ok: r.ok, failing: r.checks.filter((x) => !x.ok).map((x) => x.name) }).toEqual(c.expected);
     });
   }
+
+  // A reader decides how far to trust a receipt from the ISSUER line, so every kind the verifier accepts must say what it proves.
+  it("every accepted issuer kind has a note in the report, and a door receipt says what it does not prove", () => {
+    for (const c of receipts.cases as any[]) {
+      const r = verifyBundle(c.bundle, { issuerKeys: c.issuerKeys.map(keyOf), principalKeys: c.principalKeys.map(keyOf), logKeys: c.logKeys.map(keyOf) });
+      if (!r.checks.some((x) => x.name === "issuer kind is known" && x.ok)) continue;
+      expect(formatReport(r), c.name).not.toContain("unknown issuer kind");
+    }
+    const door = receipts.cases.find((x: any) => x.name === "door-unknown-executed");
+    const report = formatReport(verifyBundle(door.bundle, { issuerKeys: door.issuerKeys.map(keyOf), principalKeys: door.principalKeys.map(keyOf), logKeys: door.logKeys.map(keyOf) }));
+    expect(report).toMatch(/^ISSUER: door( \(\w+\))?, enforced in front of the business's own HTTP surface; .*leaves no receipt$/m);
+  });
 
   for (const c of audit.cases as any[]) {
     it(`audit: ${c.name}`, () => {

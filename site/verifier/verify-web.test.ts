@@ -4,6 +4,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { auditExtends, canonicalize, digestOf, dsseVerify, formatReport, publicKeyFromPem, verifyBundle, verifyConsistency, verifyInclusion } from "./verify-web.ts";
+import { publicKeyFromPem as cliKeyFromPem } from "../../packages/receipts/src/crypto.ts";
+import { formatReport as cliFormatReport, verifyBundle as cliVerifyBundle } from "../../packages/receipts/src/verify.ts";
 
 const dir = join(import.meta.dirname, "..", "..", "packages", "receipts", "vectors");
 const load = (f: string) => JSON.parse(readFileSync(join(dir, f), "utf8"));
@@ -24,6 +26,15 @@ describe("browser verifier against the conformance vectors", () => {
       expect({ ok: r.ok, failing: r.checks.filter((x) => !x.ok).map((x) => x.name) }).toEqual(c.expected);
     });
   }
+  it("prints the same ISSUER line as the CLI verifier for every vector", async () => {
+    const line = (report: string) => report.split("\n").find((l) => l.startsWith("ISSUER: "));
+    const cliKey = (name: string) => cliKeyFromPem(receipts.keys[name].publicKeyPem);
+    for (const c of receipts.cases as any[]) {
+      const web = await verifyBundle(c.bundle, { issuerKeys: await all(c.issuerKeys), principalKeys: await all(c.principalKeys), logKeys: await all(c.logKeys) });
+      const cli = cliVerifyBundle(c.bundle, { issuerKeys: c.issuerKeys.map(cliKey), principalKeys: c.principalKeys.map(cliKey), logKeys: c.logKeys.map(cliKey) });
+      expect(line(formatReport(web)), c.name).toBe(line(cliFormatReport(cli)));
+    }
+  });
   for (const c of audit.cases as any[]) {
     it(`audit: ${c.name}`, async () => {
       const r = await auditExtends(c.older, c.newer, c.proof, await all(c.keys));
