@@ -10,7 +10,7 @@ from typing import Any, Dict, List
 
 from agents import FunctionTool
 
-from . import Client, denies, receipt_id_of
+from . import Client, denies, no_receipt, receipt_id_of
 
 
 def _parse(input_json: str) -> Dict[str, Any]:
@@ -40,8 +40,11 @@ def wrap_tools(client: Client, tools: List[FunctionTool]) -> List[FunctionTool]:
             policy = client.decide(_t.name, args)
             if denies(policy):
                 reason = "; ".join(policy["reasons"] + policy["errors"]) or "no permit policy matched"
-                bundle = client.record(_t.name, args, {"status": "denied", "reason": reason}, policy)
-                return f"Denied by policy: {reason} (receipt {receipt_id_of(bundle)})"
+                try:
+                    bundle = client.record(_t.name, args, {"status": "denied", "reason": reason}, policy)
+                    return f"Denied by policy: {reason} (receipt {receipt_id_of(bundle)})"
+                except Exception as e:  # noqa: BLE001 - the call stays denied; the missing receipt is the message
+                    return f"Denied by policy: {reason} ({no_receipt(e)})"
             try:
                 result = await _orig(ctx, input_json)
             except Exception as e:

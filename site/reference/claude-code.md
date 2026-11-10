@@ -65,7 +65,7 @@ Claude Code writes the hook event as JSON on stdin. The fields the handler reads
 | event | what the handler does | stdout |
 | --- | --- | --- |
 | `PreToolUse`, policy denies | issues a **denied** receipt, blocks the call | `{ "continue": true, "hookSpecificOutput": { "hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "agent-custody denied this call: terraform destroy deletes infrastructure (rule policy5, receipt 47eb52af-…)" } }` |
-| `PreToolUse`, policy denies, the receipt cannot be recorded | blocks the call | the same, with `(no receipt: <why>)` in the reason |
+| `PreToolUse`, policy denies, the receipt cannot be recorded | blocks the call; prints the error on stderr | the same, with `(no receipt: the receipt could not be recorded)` in the reason. The reason names the kind of failure only: the error can carry a log URL with credentials or the log's answer, and the reason reaches the model |
 | `PreToolUse`, policy allows or none | nothing | `{}`: Claude Code's own permission prompts still apply; the hook never auto-approves |
 | `PostToolUse` | issues an **executed** receipt with `tool_response` as the result | `{}` |
 | `PostToolUseFailure` | issues a **failed** receipt with the error as the result | `{}` |
@@ -84,7 +84,7 @@ const out = await handleHookEvent(issuer, input);      // HookInput → HookOutp
 const hooks = claudeAgentHooks(issuer, "Bash|Write|Edit"); // the hooks object the Claude Agent SDK takes
 ```
 
-Python: `agent_custody.claude_agent_sdk.claude_hook(client)` and `handle_hook_event(client, input_data)`, the same input and the same decisions, through the sidecar. A Python deny reason reads `agent-custody: <reason> (receipt <id>)`. When the sidecar cannot be reached, answers without an allow or deny decision, or cannot record the denial, or the event has no `tool_name`, `PreToolUse` still denies, and the reason says `no receipt: <why>`.
+Python: `agent_custody.claude_agent_sdk.claude_hook(client)` and `handle_hook_event(client, input_data)`, the same input and the same decisions, through the sidecar. A Python deny reason reads `agent-custody: <reason> (receipt <id>)`. When the sidecar cannot be reached, answers without an allow or deny decision, or cannot record the denial, or the event has no `tool_name`, `PreToolUse` still denies, and the reason says `no receipt: <why>`. `<why>` names the kind of failure only (`the sidecar could not be reached`, `the sidecar answered HTTP <status>`, `the sidecar's answer was malformed`, `the hook event has no tool_name`, …); the error itself goes to the `agent_custody` logger at `WARNING`, because it can carry the sidecar URL with credentials or an upstream answer.
 
 ## The policy's view
 

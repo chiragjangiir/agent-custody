@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, Optional
 
-from . import Client, denies, receipt_id_of
+from . import Client, denies, no_receipt, receipt_id_of
 
 
 def _session(task_id: Optional[str], kwargs: Dict[str, Any]) -> Dict[str, Optional[str]]:
@@ -34,7 +34,7 @@ def hermes_hooks(client: Client) -> Dict[str, Callable[..., Any]]:
             bundle = client.record(tool_name, args, {"status": "denied", "reason": reason}, policy, session=session)
             return {"action": "block", "message": f"agent-custody: {reason} (receipt {receipt_id_of(bundle)})"}
         except Exception as e:  # noqa: BLE001 - the block stands; the missing receipt is the message
-            return {"action": "block", "message": f"agent-custody: {reason}; the denial receipt could not be recorded ({e})"}
+            return {"action": "block", "message": f"agent-custody: {reason} ({no_receipt(e)})"}
 
     def post_tool_call(tool_name: str, args: Optional[Dict[str, Any]] = None, result: Any = None, task_id: Optional[str] = None, duration_ms: Optional[int] = None, **kwargs: Any) -> None:
         session = _session(task_id, kwargs)

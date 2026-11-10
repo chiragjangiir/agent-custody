@@ -160,7 +160,7 @@ forbid(principal, action == Action::"Bash", resource) when { context.args.comman
     const broken = { ...sdk, record: () => Promise.reject(new Error("log unreachable")) };
     const out = await handleHookEvent(broken, { hook_event_name: "PreToolUse", tool_name: "stripe.refund", tool_input: { amount: 999999 } });
     expect(out.hookSpecificOutput?.permissionDecision).toBe("deny");
-    expect(out.hookSpecificOutput?.permissionDecisionReason).toContain("no receipt: log unreachable");
+    expect(out.hookSpecificOutput?.permissionDecisionReason).toMatch(/\(no receipt: the receipt could not be recorded\)$/);
   });
 
   it("PreToolUse: still denies when the receipt id cannot be read from the recorded bundle", async () => {

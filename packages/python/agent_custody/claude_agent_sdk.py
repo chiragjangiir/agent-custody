@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, Optional
 
-from . import Client, denies, receipt_id_of
+from . import Client, denies, no_receipt, receipt_id_of
 
 
 def _event(input_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -29,6 +29,8 @@ def handle_hook_event(client: Client, input_data: Dict[str, Any]) -> Dict[str, A
     name = input_data.get("hook_event_name")
     if name == "PreToolUse":
         # A hook that raises does not block the call, so every failure here must still answer deny.
+        if "tool_name" not in input_data:
+            return _deny("the policy could not be evaluated; no receipt: the hook event has no tool_name")
         try:
             ev = _event(input_data)
             policy = client.decide(ev["tool"], ev["args"], session=ev["session"])
@@ -38,12 +40,12 @@ def handle_hook_event(client: Client, input_data: Dict[str, Any]) -> Dict[str, A
                 return {}
             reason = "; ".join(str(r) for r in [*(policy.get("reasons") or []), *(policy.get("errors") or [])]) or "no permit policy matched"
         except Exception as e:  # noqa: BLE001
-            return _deny(f"the policy could not be evaluated; no receipt: {e}")
+            return _deny(f"the policy could not be evaluated; {no_receipt(e)}")
         try:
             bundle = client.record(ev["tool"], ev["args"], {"status": "denied", "reason": reason}, policy, session=ev["session"])
             evidence = f"receipt {receipt_id_of(bundle)}"
         except Exception as e:  # noqa: BLE001
-            evidence = f"no receipt: {e}"
+            evidence = no_receipt(e)
         return _deny(f"{reason} ({evidence})")
     if name not in ("PostToolUse", "PostToolUseFailure"):
         return {}

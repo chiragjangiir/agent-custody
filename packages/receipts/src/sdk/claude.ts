@@ -1,7 +1,7 @@
 // Adapter for Claude Code hooks (command hooks over stdin/stdout) and the Claude Agent SDK (in-process hooks).
 // Both use the same input and output JSON, so one handler serves both.
 import { reasonOfRule, type PolicyDecision } from "../policy.ts";
-import { createSdkIssuer, receiptIdOf, type SdkIssuer, type ToolEvent, denies } from "./index.ts";
+import { createSdkIssuer, noReceipt, receiptIdOf, type SdkIssuer, type ToolEvent, denies } from "./index.ts";
 
 export interface HookInput {
   hook_event_name: string;
@@ -54,7 +54,7 @@ export async function handleHookEvent(issuer: SdkIssuer, input: HookInput): Prom
         try {
           evidence = `receipt ${receiptIdOf(await issuer.record(ev, { status: "denied", reason }, policy))}`;
         } catch (e) {
-          evidence = `no receipt: ${e instanceof Error ? e.message : String(e)}`;
+          evidence = noReceipt(e);
         }
         return {
           continue: true,

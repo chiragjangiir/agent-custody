@@ -46,4 +46,4 @@ def test_a_denial_that_cannot_be_recorded_still_blocks(client, monkeypatch):
 
     monkeypatch.setattr(client, "record", refuse)
     out = hermes_hooks(client)["pre_tool_call"]("stripe.refund", {"amount": 999999}, "task-3")
-    assert out == {"action": "block", "message": "agent-custody: no permit policy matched; the denial receipt could not be recorded (sidecar record: 503)"}
+    assert out == {"action": "block", "message": "agent-custody: no permit policy matched (no receipt: the sidecar refused the request)"}

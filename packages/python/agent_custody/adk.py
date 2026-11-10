@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, Optional
 
-from . import Client, denies, receipt_id_of
+from . import Client, denies, no_receipt, receipt_id_of
 
 RECEIPT_KEY = "agent-custody/receipt"
 
@@ -52,7 +52,7 @@ def adk_callbacks(client: Client) -> Dict[str, Callable[..., Any]]:
             rid = receipt_id_of(bundle)
             return {"error": f"agent-custody: {reason} (receipt {rid})", RECEIPT_KEY: rid}
         except Exception as e:  # noqa: BLE001 - the call stays skipped; the missing receipt is the message
-            return {"error": f"agent-custody: {reason}; the denial receipt could not be recorded ({e})", RECEIPT_KEY: None}
+            return {"error": f"agent-custody: {reason} ({no_receipt(e)})", RECEIPT_KEY: None}
 
     def after_tool_callback(tool: Any, args: Dict[str, Any], tool_context: Any, tool_response: Any) -> Optional[Dict[str, Any]]:
         if isinstance(tool_response, dict) and RECEIPT_KEY in tool_response:

@@ -116,7 +116,7 @@ def test_a_denial_that_cannot_be_recorded_still_skips_the_tool(client, monkeypat
 
     monkeypatch.setattr(client, "record", refuse)
     out = adk_callbacks(client)["before_tool_callback"](SimpleNamespace(name="stripe.refund"), {"amount": 999999}, SimpleNamespace())
-    assert out == {"error": "agent-custody: no permit policy matched; the denial receipt could not be recorded (sidecar record: 503)", RECEIPT_KEY: None}
+    assert out == {"error": "agent-custody: no permit policy matched (no receipt: the sidecar refused the request)", RECEIPT_KEY: None}
 
 
 def test_a_response_that_is_not_json_is_recorded_as_text(client, recorded):

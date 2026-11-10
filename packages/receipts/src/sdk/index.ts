@@ -136,6 +136,16 @@ export function createSdkIssuer(cfg: SdkConfig): SdkIssuer {
   };
 }
 
+/**
+ * The end of a deny reason whose receipt could not be issued: `no receipt: <why>`. The reason reaches the model, so it
+ * names the failure class only; the error itself, which can carry a log URL with credentials or the text of the log's
+ * answer, goes to stderr.
+ */
+export function noReceipt(e: unknown): string {
+  console.error(`agent-custody: no receipt: ${e instanceof Error ? e.message : String(e)}`);
+  return "no receipt: the receipt could not be recorded";
+}
+
 export function receiptIdOf(bundle: ReceiptBundle): string {
   const st = JSON.parse(Buffer.from(bundle.envelope.payload, "base64").toString()) as { predicate: { receiptId: string } };
   return st.predicate.receiptId;
