@@ -5,6 +5,7 @@ All three packages, `@agent-custody/receipts`, `@agent-custody/state`, and `agen
 ## Unreleased
 
 - **Review rules for Cursor Bugbot.** `.cursor/BUGBOT.md` tells the automatic pull request reviewer what this repository treats as a bug: fail-open paths, weakened security invariants, verifiers out of step, vectors regenerated without cause, secrets, network calls without a timeout or in tests, money as a float, unescaped portal output, and caches that can mix callers. It also lists the gaps to flag (no test, stale docs, no CHANGELOG entry) and what not to flag. `CONTRIBUTING.md` says to keep it in step.
+- **Tests for five fail-safe and validation branches in receipts** (#287). An exporter that throws does not fail the call or lose the receipt. The A2A server answers 500 with a JSON-RPC error and logs the cause when its handler throws. An OIDC token response that is not JSON gives the HTTP status, not a parse error. A reconciliation `identityPath` with an empty segment is refused. `init claude-code` names the zod path of each config problem.
 
 ## 0.16.2 — 2026-11-09
 

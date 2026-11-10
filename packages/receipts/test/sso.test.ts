@@ -103,6 +103,12 @@ describe("OIDC", () => {
     await expect(oidcExchange(p.cfg, { code: "c", redirectUri: "r", codeVerifier: "v", nonce: "n-1", fetch: p.fetch })).rejects.toThrow(error);
   });
 
+  it("refuses a token response that is not JSON with the HTTP status, not a parse error", async () => {
+    const p = idp();
+    const fetch = (async (url: string, init?: RequestInit) => url.endsWith("/token") ? new Response("<html>Bad Gateway</html>", { status: 502 }) : p.fetch(url, init)) as typeof globalThis.fetch;
+    await expect(oidcExchange(p.cfg, { code: "c", redirectUri: "r", codeVerifier: "v", nonce: "n-1", fetch })).rejects.toThrow(/^the OIDC token endpoint refused the code \(HTTP 502\)$/);
+  });
+
   it("refuses a key that is marked for encryption, even when its kid matches", async () => {
     const p = idp({ keys: [{ ...jwk(rsa.publicKey, "rs1"), use: "enc" }] });
     p.setToken(jws(rsHeader, goodClaims(p.cfg), "RS256", rsa.privateKey));

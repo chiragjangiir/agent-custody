@@ -144,6 +144,8 @@ describe("init claude-code", () => {
     expect(loadSdkConfig(r.configFile).log?.keys).toEqual([join(r.dir, "log.pub")]);
     expect(() => init({ dir: join(home, "other"), logUrl: "https://log.example.com/", logTokenEnv: "sk_live_abc123" })).toThrow(/NAME of an environment variable/);
     expect(existsSync(join(home, "other"))).toBe(false);
+    expect(() => init({ dir: join(home, "bad"), logUrl: "not a url", logKey })).toThrow(/^init: the config is not valid: log\.url: /);
+    expect(existsSync(join(home, "bad"))).toBe(false);
   });
 
   it("--log-url without --log-key is refused, and so is a log key that is not a public key, with nothing written", () => {
