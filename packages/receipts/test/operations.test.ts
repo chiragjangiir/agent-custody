@@ -232,6 +232,7 @@ describe("financial operation configuration", () => {
       // the agent's operation id never reaches a receipt, so a lookup template cannot copy it into one
       (c: any) => { c.operations.tools[0].reconcile.args.key = "$operation.id"; },
       (c: any) => { c.operations.tools[0].reconcile.statusPath = "body..status"; },
+      (c: any) => { c.operations.tools[0].reconcile.identityPath = "body..idempotencyKey"; },
       (c: any) => { delete c.logFile; c.log = { url: "https://log.example" }; },
     ];
     for (const mutate of mutations) {

@@ -1,7 +1,7 @@
 // Export is additive: the collector gets a span per receipt with the receipt id as the trace id, and a collector
 // that is down or refusing costs nothing but a line on stderr. The receipt is the evidence; the span is a pointer.
 import { createServer, type Server } from "node:http";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -60,6 +60,20 @@ describe("OpenTelemetry export", () => {
     } finally {
       await gw.close();
       c.server.close();
+    }
+  });
+
+  it("an exporter that throws does not fail the call or lose the receipt", async () => {
+    const fx = buildFixture(mkdtempSync(join(tmpdir(), "agent-custody-otel-throw-")));
+    let told = 0;
+    const gw = await createGateway(loadConfig(fx.configFile), { exporter: { where: "test", async exported() { told++; throw new Error("exporter down"); } } });
+    try {
+      const ok = await gw.handleCall({ name: "stripe.refund", arguments: { customer_id: "cust_123", amount: 2500 } });
+      expect(ok.isError).toBeFalsy();
+      expect(told).toBe(1);
+      expect(existsSync(join(fx.receiptsDir, `${ok._meta?.[RECEIPT_META_KEY]}.json`))).toBe(true);
+    } finally {
+      await gw.close();
     }
   });
 
