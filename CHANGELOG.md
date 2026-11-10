@@ -4,6 +4,7 @@ All three packages, `@agent-custody/receipts`, `@agent-custody/state`, and `agen
 
 ## Unreleased
 
+- **Tests: the portal's request validation and unconfigured features** (#271). `test/portal.test.ts` now covers `/health`, the page with an escaped log URL, the body limit and the JSON content type, the registration checks for email, company, and phone, the registration and login rate limits, a bad verify link and a resend with no mail, the billing routes with no Stripe and with no billing record, a deleted tenant, a bad invite address, an unknown member and a bad role, empty policy text, the 404 answers, and the checks on the table prefix and the SSO domains. No production code changes.
 - **Review rules for Cursor Bugbot.** `.cursor/BUGBOT.md` tells the automatic pull request reviewer what this repository treats as a bug: fail-open paths, weakened security invariants, verifiers out of step, vectors regenerated without cause, secrets, network calls without a timeout or in tests, money as a float, unescaped portal output, and caches that can mix callers. It also lists the gaps to flag (no test, stale docs, no CHANGELOG entry) and what not to flag. `CONTRIBUTING.md` says to keep it in step.
 
 ## 0.16.2 — 2026-11-09
