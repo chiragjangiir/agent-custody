@@ -13,7 +13,7 @@ import { MemoryClient } from "mem0ai";
 import { ZepClient } from "@getzep/zep-cloud";
 import { Ledger } from "../src/ledger.ts";
 import { createMemoryServer } from "../src/server.ts";
-import { mem0Store, zepStore } from "../src/stores.ts";
+import { mem0Store, pgvectorStore, zepStore, type ZepLike } from "../src/stores.ts";
 import type { Fact } from "../src/ledger.ts";
 
 interface Seen { method: string; path: string; body: any; auth: string | undefined }
@@ -309,5 +309,46 @@ describe("listing what a store holds, through the real clients", () => {
   it("a client without a list method gives a store without list", () => {
     expect(mem0Store({ add: async () => [], delete: async () => ({}) }, { userId: "u" }).list).toBeUndefined();
     expect(zepStore({ graph: { add: async () => ({ uuid: "u" }), episode: { delete: async () => ({}) } } }, { userId: "u" }).list).toBeUndefined();
+  });
+});
+
+describe("verification and refusals, against plain fake clients", () => {
+  const entry = { externalId: "ep_1", factId: "fact-1", text: "acct:1 plan: pro" };
+
+  it("a put that gets no id back throws, for mem0 and for zep", async () => {
+    await expect(mem0Store({ add: async () => [{}], delete: async () => ({}) }, { userId: "u" }).put(aFact(1))).rejects.toThrow("mem0 returned no memory id");
+    await expect(zepStore({ graph: { add: async () => ({}) as { uuid: string }, episode: { delete: async () => ({}) } } }, { userId: "u" }).put(aFact(1))).rejects.toThrow("zep returned no episode uuid");
+  });
+
+  it("zep verifyDeleted is false while an edge still cites the episode, and true once nothing does", async () => {
+    let edges = [{ uuid: "edge-1", fact: "acct:1 is on pro", episodes: ["ep_0", "ep_1"] }];
+    // The graph g1 indexes the entry's text only. Any other graph, user, query or a zero limit finds nothing.
+    const search: NonNullable<ZepLike["graph"]["search"]> = async (r) => (r.graphId === "g1" && r.userId === undefined && r.query === entry.text ? { edges: edges.slice(0, r.limit) } : {});
+    const store = zepStore({ graph: { add: async () => ({ uuid: "x" }), episode: { delete: async () => ({}) }, search } }, { graphId: "g1" });
+    expect(await store.verifyDeleted!(entry)).toBe(false);
+    edges = [{ uuid: "edge-1", fact: "acct:1 is on pro", episodes: ["ep_0"] }];
+    expect(await store.verifyDeleted!(entry)).toBe(true);
+  });
+
+  const zepPages = (pages: { data: { uuid: string; content: string }[]; next?: string }[]): ZepLike => {
+    let i = 0;
+    const page = () => ({ withRawResponse: async () => { const p = pages[i++]!; return { data: p.data, rawResponse: { headers: { get: (n: string) => (n === "Zep-Next-Cursor" ? (p.next ?? null) : null) } } }; } });
+    return { graph: { add: async () => ({ uuid: "x" }), episode: { delete: async () => ({}), listByUserId: page } } };
+  };
+  const ep = (n: number) => ({ uuid: `ep_${n}`, content: JSON.stringify({ subject: `acct:${n}`, predicate: "plan", value: "pro", factId: `fact-${n}`, source: "agent-custody" }) });
+
+  it("zep listing returns an episode once when a later page repeats it", async () => {
+    const listed = await zepStore(zepPages([{ data: [ep(1)], next: "c1" }, { data: [ep(1), ep(2)] }]), { userId: "u" }).list!();
+    expect(listed.map((e) => e.externalId)).toEqual(["ep_1", "ep_2"]);
+  });
+
+  it("zep listing throws when the backend repeats a cursor, even with new episodes", async () => {
+    await expect(zepStore(zepPages([{ data: [ep(1)], next: "c1" }, { data: [ep(2)], next: "c1" }, { data: [] }]), { userId: "u" }).list!()).rejects.toThrow("zep: listing does not advance");
+  });
+
+  it("pgvector refuses dimensions that are not a positive integer", () => {
+    const client = { query: async () => ({ rows: [] }) };
+    for (const dimensions of [0, -3, 1.5, Number.NaN]) expect(() => pgvectorStore(client, { embed: async () => [], dimensions })).toThrow("pgvector: dimensions must be a positive integer");
+    expect(() => pgvectorStore(client, { embed: async () => [], dimensions: 3 })).not.toThrow();
   });
 });
