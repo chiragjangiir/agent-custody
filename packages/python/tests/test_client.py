@@ -1,7 +1,11 @@
+import io
+import urllib.error
+import urllib.request
+
 import pytest
 
-from agent_custody import PolicyDeniedError, SidecarError, receipt_id_of
-from conftest import receipt_count, verify
+from agent_custody import Client, PolicyDeniedError, SidecarError, receipt_id_of
+from conftest import closed_port, receipt_count, verify
 
 
 def test_health_names_the_agent(client):
@@ -53,3 +57,23 @@ def test_a_malformed_record_is_refused_and_nothing_is_written(client, sidecar):
     with pytest.raises(SidecarError, match="400"):
         client.record("t", {}, {"status": "maybe"})
     assert receipt_count(sidecar) == before
+
+
+def test_an_unreachable_sidecar_is_a_sidecar_error():
+    url = f"http://127.0.0.1:{closed_port()}/"
+    with pytest.raises(SidecarError, match=f"^sidecar unreachable at {url}: "):
+        Client(url).decide("customer.lookup", {})
+
+
+def test_an_http_error_carries_the_sidecars_detail(sidecar):
+    with pytest.raises(SidecarError, match="^sidecar decide: 404 not found$"):
+        Client(sidecar["url"] + "nope/").decide("customer.lookup", {})
+
+
+def test_an_http_error_without_a_json_body_carries_the_status(monkeypatch):
+    def fail(req, timeout):
+        raise urllib.error.HTTPError(req.full_url, 502, "Bad Gateway", {}, io.BytesIO(b"<html>bad gateway</html>"))
+
+    monkeypatch.setattr(urllib.request, "urlopen", fail)
+    with pytest.raises(SidecarError, match="^sidecar decide: 502$"):
+        Client().decide("customer.lookup", {})

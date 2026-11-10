@@ -4,6 +4,8 @@ All three packages, `@agent-custody/receipts`, `@agent-custody/state`, and `agen
 
 ## Unreleased
 
+- **Tests for the Python error paths (#273).** Each adapter now has a test that a tool which raises gets an `error` or `failed` receipt and the exception is raised again, and that input which is not a JSON object is recorded as `{"input": ...}`. Tests also cover a denial receipt that cannot be recorded (ADK, Hermes), `_refusal` in `memory.py`, a failed MCP handshake, and the client's `HTTPError` and `URLError` paths. A strict `xfail` test shows that a closed memory server port raises `httpx.ConnectError`, not `MemoryError`.
+
 - **Review rules for Cursor Bugbot.** `.cursor/BUGBOT.md` tells the automatic pull request reviewer what this repository treats as a bug: fail-open paths, weakened security invariants, verifiers out of step, vectors regenerated without cause, secrets, network calls without a timeout or in tests, money as a float, unescaped portal output, and caches that can mix callers. It also lists the gaps to flag (no test, stale docs, no CHANGELOG entry) and what not to flag. `CONTRIBUTING.md` says to keep it in step.
 
 ## 0.16.2 — 2026-11-09

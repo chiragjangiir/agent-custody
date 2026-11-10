@@ -2,6 +2,7 @@
 # skips a denied tool and the model sees the receipt id; an allowed tool runs and is recorded once; every receipt
 # passes the TypeScript verifier.
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 from google.adk.agents import LlmAgent
@@ -11,6 +12,7 @@ from google.adk.runners import InMemoryRunner
 from google.adk.tools.base_tool import BaseTool
 from google.genai import types
 
+from agent_custody import SidecarError
 from agent_custody.adk import RECEIPT_KEY, adk_callbacks
 from conftest import receipt_count, verify
 
@@ -106,3 +108,22 @@ def test_allowed_tool_runs_and_is_recorded_once(sidecar, client):
 
 def test_callbacks_are_the_two_llm_agent_fields():
     assert set(adk_callbacks(None)) == {"before_tool_callback", "after_tool_callback"}
+
+
+def test_a_denial_that_cannot_be_recorded_still_skips_the_tool(client, monkeypatch):
+    def refuse(*a, **k):
+        raise SidecarError("sidecar record: 503")
+
+    monkeypatch.setattr(client, "record", refuse)
+    out = adk_callbacks(client)["before_tool_callback"](SimpleNamespace(name="stripe.refund"), {"amount": 999999}, SimpleNamespace())
+    assert out == {"error": "agent-custody: no permit policy matched; the denial receipt could not be recorded (sidecar record: 503)", RECEIPT_KEY: None}
+
+
+def test_a_response_that_is_not_json_is_recorded_as_text(client, recorded):
+    class Answer:
+        def __str__(self):
+            return "Dana"
+
+    ctx = SimpleNamespace(invocation_id="inv-1", function_call_id="fc-1")
+    assert adk_callbacks(client)["after_tool_callback"](SimpleNamespace(name="customer.lookup"), {"id": "c1"}, ctx, Answer()) is None
+    assert recorded[0]["execution"]["result"] == "Dana"
