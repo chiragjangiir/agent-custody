@@ -84,7 +84,7 @@ const out = await handleHookEvent(issuer, input);      // HookInput → HookOutp
 const hooks = claudeAgentHooks(issuer, "Bash|Write|Edit"); // the hooks object the Claude Agent SDK takes
 ```
 
-Python: `agent_custody.claude_agent_sdk.claude_hook(client)` and `handle_hook_event(client, input_data)`, same input and output, through the sidecar.
+Python: `agent_custody.claude_agent_sdk.claude_hook(client)` and `handle_hook_event(client, input_data)`, same input and output, through the sidecar. When the sidecar cannot be reached or the denial cannot be recorded, `PreToolUse` still denies, and the reason ends with `no receipt: <reason>`.
 
 ## The policy's view
 

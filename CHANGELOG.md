@@ -4,6 +4,9 @@ All three packages, `@agent-custody/receipts`, `@agent-custody/state`, and `agen
 
 ## Unreleased
 
+## 0.16.3 — 2026-11-10
+
+- **The Python Claude Agent SDK hook blocks a denied call when it cannot record the denial.** `handle_hook_event` in `agent_custody.claude_agent_sdk` raised when the sidecar refused or could not reach the log while it recorded a denial, and when the sidecar could not be reached to decide. The Claude Agent SDK does not block a call whose hook raises, so in both cases the call could run. `PreToolUse` now answers deny in both cases, and the reason ends with `no receipt: <reason>`, as the TypeScript hook and the Claude Code command hook already did. `tests/test_claude_hooks.py` fails if either case raises again. The ADK and Hermes adapters already blocked, and the OpenAI Agents and CrewAI wrappers raise before the tool runs.
 - **Review rules for Cursor Bugbot.** `.cursor/BUGBOT.md` tells the automatic pull request reviewer what this repository treats as a bug: fail-open paths, weakened security invariants, verifiers out of step, vectors regenerated without cause, secrets, network calls without a timeout or in tests, money as a float, unescaped portal output, and caches that can mix callers. It also lists the gaps to flag (no test, stale docs, no CHANGELOG entry) and what not to flag. `CONTRIBUTING.md` says to keep it in step.
 
 ## 0.16.2 — 2026-11-09
