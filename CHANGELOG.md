@@ -4,6 +4,7 @@ All three packages, `@agent-custody/receipts`, `@agent-custody/state`, and `agen
 
 ## Unreleased
 
+- **Tests for the Claude Agent SDK and OpenAI Agents hook wrappers.** `test/sdk.test.ts` now covers the `PostToolUseFailure` hook (a `failed` receipt), the callback and the `matcher` of `claudeAgentHooks`, the argument and result parsing of `wrapTools` and its error receipt, an `observeRunner` log failure that goes to stderr and is not thrown, and a `captureKeyEnv` variable that is not set. No production code changes.
 - **Review rules for Cursor Bugbot.** `.cursor/BUGBOT.md` tells the automatic pull request reviewer what this repository treats as a bug: fail-open paths, weakened security invariants, verifiers out of step, vectors regenerated without cause, secrets, network calls without a timeout or in tests, money as a float, unescaped portal output, and caches that can mix callers. It also lists the gaps to flag (no test, stale docs, no CHANGELOG entry) and what not to flag. `CONTRIBUTING.md` says to keep it in step.
 - **Tests for five fail-safe and validation branches in receipts** (#287). An exporter that throws does not fail the call or lose the receipt. The A2A server answers 500 with a JSON-RPC error and logs the cause when its handler throws. An OIDC token response that is not JSON gives the HTTP status, not a parse error. A reconciliation `identityPath` with an empty segment is refused. `init claude-code` names the zod path of each config problem.
 
